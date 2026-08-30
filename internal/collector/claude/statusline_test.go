@@ -206,7 +206,9 @@ func TestCaptureStatusLineRejectsMalformedAndUnsafeNumbers(t *testing.T) {
 
 func TestCollectorEnrichesExactResolvedSessionAndIgnoresBadState(t *testing.T) {
 	projectsDir, transcriptPath := makeTranscriptPath(t, "enriched-session")
-	if err := os.WriteFile(transcriptPath, []byte(transcriptRecord("enriched-session", "message", 2, 3)+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(transcriptPath, []byte(transcriptRecordWithCWD(
+		"enriched-session", "message", "/workspace", fixtureNow.Add(-2*time.Minute), 2, 3,
+	)+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	stateDir := t.TempDir()
@@ -256,6 +258,129 @@ func TestCollectorEnrichesExactResolvedSessionAndIgnoresBadState(t *testing.T) {
 	}
 	if badSnapshot.Tokens.Total != 9 || badSnapshot.Context != nil || badSnapshot.Quota != nil {
 		t.Fatalf("snapshot with malformed state = %#v", badSnapshot)
+	}
+}
+
+func TestCollectorContextFreshnessUsesLogicalTranscriptTimestamp(t *testing.T) {
+	const sessionID = "logical-freshness-session"
+	projectsDir, transcriptPath := makeTranscriptPath(t, sessionID)
+	initialRecord := transcriptRecordWithCWD(
+		sessionID, "message-1", "/workspace", fixtureNow.Add(-2*time.Minute), 2, 3,
+	)
+	housekeepingRecord := `{"type":"last-prompt","lastPrompt":"redacted in test"}`
+	if err := os.WriteFile(transcriptPath, []byte(initialRecord+"\n"+housekeepingRecord+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stateDir := t.TempDir()
+	payload := fmt.Sprintf(`{
+		"session_id":%q,
+		"context_window":{"context_window_size":200000,"used_percentage":12.5},
+		"rate_limits":{"five_hour":{"used_percentage":25,"resets_at":%d}}
+	}`, sessionID, fixtureNow.Add(time.Hour).Unix())
+	if err := CaptureStatusLineWithOptions(strings.NewReader(payload), &bytes.Buffer{},
+		WithCaptureStateDir(stateDir),
+		WithCaptureNow(func() time.Time { return fixtureNow.Add(-time.Minute) }),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	// A resume or shutdown can touch the transcript without appending a logical
+	// record. That filesystem-only change must not discard the captured context.
+	touchedAt := fixtureNow.Add(time.Hour)
+	if err := os.Chtimes(transcriptPath, touchedAt, touchedAt); err != nil {
+		t.Fatal(err)
+	}
+	collector := New(
+		WithProjectsDir(projectsDir),
+		WithStatusDir(stateDir),
+		WithNow(func() time.Time { return fixtureNow }),
+	)
+	touched, err := collector.Collect(context.Background(), basecollector.Target{SessionID: sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if touched.Context == nil || touched.Context.Used != 25000 || touched.Context.Limit != 200000 {
+		t.Fatalf("context after mtime-only touch = %#v, want 25000/200000", touched.Context)
+	}
+	if touched.Quota == nil || len(touched.Quota.Windows) != 1 {
+		t.Fatalf("quota after mtime-only touch = %#v, want active 5h window", touched.Quota)
+	}
+
+	// A complete record whose logical timestamp is later than the capture does
+	// invalidate context. Account quota freshness remains independent.
+	laterRecord := fmt.Sprintf(`{"type":"user","sessionId":%q,"timestamp":%q,"message":{"role":"user"}}`,
+		sessionID, fixtureNow.Add(-30*time.Second).Format(time.RFC3339Nano))
+	file, err := os.OpenFile(transcriptPath, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString(laterRecord + "\n"); err != nil {
+		_ = file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	advanced, err := collector.Collect(context.Background(), basecollector.Target{SessionID: sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if advanced.Context != nil {
+		t.Fatalf("context after later logical record = %#v, want nil", advanced.Context)
+	}
+	if advanced.Quota == nil || len(advanced.Quota.Windows) != 1 {
+		t.Fatalf("quota after later logical record = %#v, want active 5h window", advanced.Quota)
+	}
+}
+
+func TestCollectorContextFreshnessFallsBackToTranscriptMTime(t *testing.T) {
+	const sessionID = "mtime-fallback-session"
+	projectsDir, transcriptPath := makeTranscriptPath(t, sessionID)
+	timestampedRecord := transcriptRecordWithCWD(
+		sessionID, "timestamped-message", "/workspace", fixtureNow.Add(-2*time.Minute), 2, 3,
+	)
+	// An assistant record can change context, so its missing timestamp forces the
+	// conservative filesystem-mtime fallback even when other records are dated.
+	unstampedRecord := transcriptRecord(sessionID, "unstamped-message", 4, 5)
+	if err := os.WriteFile(transcriptPath, []byte(timestampedRecord+"\n"+unstampedRecord+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stateDir := t.TempDir()
+	payload := fmt.Sprintf(`{
+		"session_id":%q,
+		"context_window":{"context_window_size":100000,"used_percentage":10},
+		"rate_limits":{"seven_day":{"used_percentage":30,"resets_at":%d}}
+	}`, sessionID, fixtureNow.Add(time.Hour).Unix())
+	if err := CaptureStatusLineWithOptions(strings.NewReader(payload), &bytes.Buffer{},
+		WithCaptureStateDir(stateDir),
+		WithCaptureNow(func() time.Time { return fixtureNow }),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	// If any complete record lacks a usable timestamp, a newer filesystem mtime
+	// is treated as a possible transcript change and invalidates context.
+	updatedAt := fixtureNow.Add(time.Minute)
+	if err := os.Chtimes(transcriptPath, updatedAt, updatedAt); err != nil {
+		t.Fatal(err)
+	}
+	collector := New(
+		WithProjectsDir(projectsDir),
+		WithStatusDir(stateDir),
+		WithNow(func() time.Time { return fixtureNow.Add(2 * time.Minute) }),
+	)
+	snapshot, err := collector.Collect(context.Background(), basecollector.Target{SessionID: sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Context != nil {
+		t.Fatalf("context with newer fallback mtime = %#v, want nil", snapshot.Context)
+	}
+	if snapshot.Quota == nil || len(snapshot.Quota.Windows) != 1 {
+		t.Fatalf("quota with newer fallback mtime = %#v, want active 7d window", snapshot.Quota)
 	}
 }
 

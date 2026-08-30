@@ -78,9 +78,9 @@ herdr integration status
 
 ### Claude context and limits
 
-Claude Code supplies live context and account windows to status-line commands rather than its transcript. Run `token-usage setup` and merge its generated `statusLine` entry into `~/.claude/settings.json`; it includes the absolute path to the installed executable. Restart Claude Code after changing the setting.
+Claude Code supplies live context and account windows to status-line commands rather than its transcript. Run `token-usage setup` and merge its generated `statusLine` entry into `~/.claude/settings.json`; it includes the absolute path to the installed executable and refreshes the bridge every 60 seconds. Restart Claude Code after changing the setting.
 
-The command stores only a hash of the session ID, numeric context/limit fields, and a capture timestamp under the user cache directory. It does not persist cwd, transcript paths, model labels, prompts, responses, or tool payloads. Context remains valid while that session's transcript is unchanged; account percentages expire after five minutes or their reported reset.
+Claude may omit context and account windows until the session receives its first API response, so `not reported` is expected before the first completed response. The command stores only a hash of the session ID, numeric context/limit fields, and a capture timestamp under the user cache directory. It does not persist cwd, transcript paths, model labels, prompts, responses, or tool payloads. Context remains valid while that session's transcript is unchanged; account percentages expire after five minutes or their reported reset. The 60-second refresh keeps available values inside that freshness window while Claude remains open.
 
 Install the integration before starting the corresponding harness. OpenCode loads its Herdr plugin at process startup, so after installing it, exit and relaunch any already-running OpenCode processes (or recreate their Herdr panes). Relaunching to OpenCode's `Ask anything...` home screen is not enough: continue an existing root session, or send the first prompt to create one, and wait a moment for Herdr to receive its session ID. Then republish usage metadata:
 

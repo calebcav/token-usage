@@ -56,4 +56,10 @@ func TestSetupMentionsSidebarAndContract(t *testing.T) {
 	if !strings.Contains(output.String(), `"command": "'/tmp/Token Usage/token-usage' claude-statusline"`) {
 		t.Fatalf("setup output does not safely quote the executable:\n%s", output.String())
 	}
+	if !strings.Contains(output.String(), `"refreshInterval": 60`) {
+		t.Fatalf("setup output does not keep Claude status-line state fresh:\n%s", output.String())
+	}
+	if !strings.Contains(output.String(), "first API response") {
+		t.Fatalf("setup output does not explain when Claude usage becomes available:\n%s", output.String())
+	}
 }
