@@ -6,7 +6,7 @@ The plugin has four boundaries:
 Herdr session snapshot
         │
         ▼
- pane/session targets ──► harness collectors ──► UsageSnapshot v1
+ pane/session targets ──► harness collectors ──► UsageSnapshot v2
         │                                            │
         └────────────────────────────────────────────┤
                                                      ├─► sidebar metadata
@@ -37,10 +37,13 @@ External collectors can optionally declare foreground process names. The service
 
 ```text
 Total = FreshInput + CacheRead + CacheWrite + Output
+Spent = FreshInput + Output
 Reasoning <= Output
 ```
 
-Source-specific inclusive/subset fields are normalized before a snapshot crosses the collector boundary. `Snapshot.Validate` rejects arithmetic drift, impossible context windows, unknown confidence values, missing source labels, and unsupported schema versions.
+Source-specific inclusive/subset fields are normalized before a snapshot crosses the collector boundary. Human-facing headline values use `Spent`, while `Total` preserves all processed tokens for the detailed breakdown and machine-readable snapshot. `Snapshot.Validate` rejects arithmetic drift, impossible context windows, unknown confidence values, missing source labels, and unsupported schema versions.
+
+Context occupancy and account quotas are separate optional values. A context window has token `used` and `limit` counters. A quota snapshot has one or more labeled percentage windows, optional reset timestamps, collection time, and safe provenance. Renderers show `not reported` when either value is absent; they never derive an account quota from session token totals. `$limit` selects the highest-used reported quota window for compact metadata.
 
 ## Freshness and ordering
 
@@ -49,6 +52,8 @@ Herdr metadata is runtime-only, so the startup hook republishes it after session
 The dashboard performs its own five-second refresh and includes working sessions. Duplicate panes attached to the same harness/session are collapsed to the newest snapshot in the popup and one-shot status view, while sidebar metadata remains pane-specific.
 
 Claude transcript state is cached in memory by path and byte offset. After a clean read, later refreshes parse only appended records; truncation or replacement falls back to a complete parse, and an unterminated final record is never committed to the cache.
+
+Claude status-line state is privacy-filtered before it reaches disk. Context remains valid while the transcript is unchanged; account percentages expire after five minutes or their window reset. Codex app-server quota state is keyed by `CODEX_HOME` and executable, expires after one minute or an earlier window reset, and is always best effort. OpenCode resolves model context with external plugins disabled, uses the session's authoritative directory, and caches only successful limits for ten minutes.
 
 Version 0.1 aggregates direct/root-session records. Claude subagent transcript directories, Codex child rollouts, and OpenCode child-session rows remain separate and are not added to their parent's total.
 

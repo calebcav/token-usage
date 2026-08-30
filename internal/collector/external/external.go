@@ -23,10 +23,11 @@ import (
 )
 
 const (
-	ContractVersion  = 1
-	defaultTimeout   = 5 * time.Second
-	defaultWaitDelay = time.Second
-	maxOutputBytes   = 1 << 20
+	LegacyContractVersion = 1
+	ContractVersion       = 2
+	defaultTimeout        = 5 * time.Second
+	defaultWaitDelay      = time.Second
+	maxOutputBytes        = 1 << 20
 )
 
 type Command struct {
@@ -142,6 +143,7 @@ type Collector struct {
 	runner       Runner
 	timeout      time.Duration
 	now          func() time.Time
+	version      int
 }
 
 type Option func(*Collector)
@@ -159,8 +161,8 @@ func WithNow(now func() time.Time) Option {
 }
 
 func New(config Config, options ...Option) (*Collector, error) {
-	if config.SchemaVersion != ContractVersion {
-		return nil, fmt.Errorf("external collector config schema is %d; expected %d", config.SchemaVersion, ContractVersion)
+	if config.SchemaVersion != LegacyContractVersion && config.SchemaVersion != ContractVersion {
+		return nil, fmt.Errorf("external collector config schema is %d; expected %d or %d", config.SchemaVersion, LegacyContractVersion, ContractVersion)
 	}
 	item := &Collector{
 		commands:     make(map[string][]string, len(config.Collectors)),
@@ -168,6 +170,7 @@ func New(config Config, options ...Option) (*Collector, error) {
 		runner:       ExecRunner{},
 		timeout:      defaultTimeout,
 		now:          time.Now,
+		version:      config.SchemaVersion,
 	}
 	for harness, entry := range config.Collectors {
 		canonical := collector.CanonicalHarness(harness)
@@ -289,7 +292,7 @@ func (item *Collector) Collect(ctx context.Context, target collector.Target) (us
 		return usage.Snapshot{}, fmt.Errorf("%w: %s", collector.ErrUnsupported, target.Harness)
 	}
 
-	request, err := json.Marshal(Request{SchemaVersion: ContractVersion, Target: target})
+	request, err := json.Marshal(Request{SchemaVersion: item.version, Target: target})
 	if err != nil {
 		return usage.Snapshot{}, fmt.Errorf("encode external collector request: %w", err)
 	}
@@ -319,9 +322,18 @@ func (item *Collector) Collect(ctx context.Context, target collector.Target) (us
 	if err := requireJSONEOF(decoder); err != nil {
 		return usage.Snapshot{}, fmt.Errorf("%w: decode external %s collector response: %v", collector.ErrMalformed, harness, err)
 	}
-	if response.SchemaVersion != ContractVersion {
-		return usage.Snapshot{}, fmt.Errorf("%w: external %s schema is %d; expected %d", collector.ErrMalformed, harness, response.SchemaVersion, ContractVersion)
+	if response.SchemaVersion != item.version {
+		return usage.Snapshot{}, fmt.Errorf("%w: external %s schema is %d; expected %d", collector.ErrMalformed, harness, response.SchemaVersion, item.version)
 	}
+	if item.version == LegacyContractVersion {
+		var legacyEnvelope struct {
+			Quota json.RawMessage `json:"quota"`
+		}
+		if json.Unmarshal(stdout, &legacyEnvelope) != nil || legacyEnvelope.Quota != nil {
+			return usage.Snapshot{}, fmt.Errorf("%w: external %s schema %d does not support quota", collector.ErrMalformed, harness, item.version)
+		}
+	}
+	response.SchemaVersion = usage.SchemaVersion
 	if response.Harness == "" {
 		response.Harness = harness
 	}

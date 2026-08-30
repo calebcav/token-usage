@@ -232,7 +232,7 @@ func (s *Service) collectOne(ctx context.Context, target collector.Target, publi
 }
 
 func metadataFor(snapshot *usage.Snapshot) herdr.Metadata {
-	keys := []string{"usage", "context", "model", "harness", "confidence"}
+	keys := []string{"usage", "context", "limit", "model", "harness", "confidence"}
 	tokens := make(map[string]*string, len(keys))
 	for _, key := range keys {
 		tokens[key] = nil
@@ -243,12 +243,16 @@ func metadataFor(snapshot *usage.Snapshot) herdr.Metadata {
 
 	usageValue := snapshot.CompactUsage()
 	contextValue := snapshot.CompactContext()
+	limitValue := snapshot.CompactLimit()
 	modelValue := snapshot.Model
 	harnessValue := snapshot.Harness
 	confidenceValue := string(snapshot.Confidence)
 	tokens["usage"] = &usageValue
 	if contextValue != "" {
 		tokens["context"] = &contextValue
+	}
+	if limitValue != "" {
+		tokens["limit"] = &limitValue
 	}
 	if modelValue != "" {
 		tokens["model"] = &modelValue

@@ -20,12 +20,15 @@ func TestParseEvent(t *testing.T) {
 func TestPrintStatusIncludesUnavailableRows(t *testing.T) {
 	tokens, _ := usage.NewTokens(100, 20, 0, 30, 5)
 	results := []app.Result{
-		{Target: collector.Target{Harness: "codex", PaneID: "w1:p1"}, Snapshot: &usage.Snapshot{Harness: "codex", PaneID: "w1:p1", Model: "gpt-5", Tokens: tokens, Confidence: usage.ConfidenceExact}},
+		{Target: collector.Target{Harness: "codex", PaneID: "w1:p1"}, Snapshot: &usage.Snapshot{
+			Harness: "codex", PaneID: "w1:p1", Model: "gpt-5", Tokens: tokens, Confidence: usage.ConfidenceExact,
+			Quota: &usage.QuotaSnapshot{Windows: []usage.QuotaWindow{{Label: "5h", UsedPercent: 42}}},
+		}},
 		{Target: collector.Target{Harness: "aider", PaneID: "w1:p2"}, Error: "unsupported harness"},
 	}
 	var output bytes.Buffer
 	printStatus(&output, results)
-	for _, want := range []string{"HARNESS", "codex", "gpt-5", "150", "aider", "unsupported harness"} {
+	for _, want := range []string{"HARNESS", "SPENT", "LIMIT", "codex", "gpt-5", "130", "5h 42%", "aider", "unsupported harness"} {
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("status output missing %q:\n%s", want, output.String())
 		}
@@ -46,8 +49,11 @@ func TestPrintStatusSanitizesUnavailableRows(t *testing.T) {
 
 func TestSetupMentionsSidebarAndContract(t *testing.T) {
 	var output bytes.Buffer
-	printSetup(&output, "/tmp/token-usage/collectors.json")
-	if !strings.Contains(output.String(), "$usage") || !strings.Contains(output.String(), "collectors.json") {
+	printSetup(&output, "/tmp/token-usage/collectors.json", "/tmp/Token Usage/token-usage")
+	if !strings.Contains(output.String(), "$usage") || !strings.Contains(output.String(), "$limit") || !strings.Contains(output.String(), "claude-statusline") || !strings.Contains(output.String(), "collectors.json") {
 		t.Fatalf("setup output is incomplete:\n%s", output.String())
+	}
+	if !strings.Contains(output.String(), `"command": "'/tmp/Token Usage/token-usage' claude-statusline"`) {
+		t.Fatalf("setup output does not safely quote the executable:\n%s", output.String())
 	}
 }

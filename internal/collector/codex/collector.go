@@ -31,6 +31,19 @@ type Config struct {
 	AllowCWDRecencyFallback bool
 	RecencyWindow           time.Duration
 
+	// EnableAccountLimits opts into asking an authenticated Codex app-server
+	// process for account rate limits. It is disabled by default.
+	EnableAccountLimits bool
+	// Binary overrides the Codex executable used for app-server requests.
+	Binary string
+	// QuotaLoader overrides the app-server process boundary. It returns the
+	// encoded result object from account/rateLimits/read.
+	QuotaLoader QuotaLoader
+	// CachePath overrides the account-limit cache file location.
+	CachePath string
+	// QuotaTimeout bounds account-limit retrieval. Zero uses five seconds.
+	QuotaTimeout time.Duration
+
 	// Now exists so recency checks and snapshots can be deterministic in tests.
 	// It defaults to time.Now.
 	Now func() time.Time
@@ -42,6 +55,13 @@ type Collector struct {
 	allowCWDRecencyFallback bool
 	recencyWindow           time.Duration
 	now                     func() time.Time
+	enableAccountLimits     bool
+	binary                  string
+	quotaLoader             QuotaLoader
+	quotaCachePath          string
+	quotaTimeout            time.Duration
+	quotaGate               chan struct{}
+	quotaFailureAt          time.Time
 }
 
 // New constructs a Codex collector. An empty Home follows Codex's normal
@@ -65,12 +85,34 @@ func New(config Config) *Collector {
 	if now == nil {
 		now = time.Now
 	}
+	binary := strings.TrimSpace(config.Binary)
+	if binary == "" {
+		binary = defaultCodexBinary
+	}
+	timeout := config.QuotaTimeout
+	if timeout <= 0 {
+		timeout = defaultQuotaTimeout
+	}
+	cachePath := strings.TrimSpace(config.CachePath)
+	if config.EnableAccountLimits && cachePath == "" {
+		if cacheDir, err := os.UserCacheDir(); err == nil {
+			cachePath = defaultQuotaCachePath(filepath.Join(cacheDir, "token-usage"), home, binary)
+		}
+	}
+	quotaGate := make(chan struct{}, 1)
+	quotaGate <- struct{}{}
 
 	return &Collector{
 		home:                    home,
 		allowCWDRecencyFallback: config.AllowCWDRecencyFallback,
 		recencyWindow:           window,
 		now:                     now,
+		enableAccountLimits:     config.EnableAccountLimits,
+		binary:                  binary,
+		quotaLoader:             config.QuotaLoader,
+		quotaCachePath:          cachePath,
+		quotaTimeout:            timeout,
+		quotaGate:               quotaGate,
 	}
 }
 
@@ -132,6 +174,16 @@ func (c *Collector) Collect(ctx context.Context, target basecollector.Target) (u
 	}
 	if err := snapshot.Validate(); err != nil {
 		return usage.Snapshot{}, malformed(err)
+	}
+	if c.enableAccountLimits {
+		if quota := c.collectQuota(ctx); quota != nil {
+			snapshot.Quota = quota
+			// Quota is best effort. Schema drift or a bad cache entry must not
+			// turn a valid local rollout snapshot into a collection failure.
+			if err := snapshot.Validate(); err != nil {
+				snapshot.Quota = nil
+			}
+		}
 	}
 	return snapshot, nil
 }

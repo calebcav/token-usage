@@ -16,19 +16,23 @@ import (
 func TestViewRendersUsageAndInclusiveReasoning(t *testing.T) {
 	tokens, _ := usage.NewTokens(1_000, 2_000, 500, 750, 250)
 	snapshot := usage.Snapshot{
-		Harness:     "codex",
-		PaneID:      "w1:p1",
-		SessionID:   "session-1",
-		Model:       "gpt-5.6",
-		State:       "idle",
-		Tokens:      tokens,
-		Context:     &usage.ContextWindow{Used: 4_250, Limit: 10_000},
+		Harness:   "codex",
+		PaneID:    "w1:p1",
+		SessionID: "session-1",
+		Model:     "gpt-5.6",
+		State:     "idle",
+		Tokens:    tokens,
+		Context:   &usage.ContextWindow{Used: 4_250, Limit: 10_000},
+		Quota: &usage.QuotaSnapshot{Windows: []usage.QuotaWindow{
+			{Label: "5h", UsedPercent: 42},
+			{Label: "7d", UsedPercent: 73},
+		}},
 		Confidence:  usage.ConfidenceExact,
 		CollectedAt: time.Now(),
 	}
 	m := model{width: 110, results: []app.Result{{Target: collector.Target{PaneID: "w1:p1"}, Snapshot: &snapshot}}}
 	content := m.View().Content
-	for _, want := range []string{"TOKEN USAGE", "CODEX", "gpt-5.6", "4.2k", "43%", "━", "5.8k left", "reasoning 250 (inside output)", "match exact"} {
+	for _, want := range []string{"TOKEN USAGE", "SPENT  1.8k", "CODEX", "gpt-5.6", "processed 4.2k", "43%", "━", "5.8k left", "ACCOUNT LIMITS", "5h 42% used", "7d 73% used", "reasoning 250 (inside output)", "match exact"} {
 		if !strings.Contains(strings.ToUpper(content), strings.ToUpper(want)) {
 			t.Fatalf("view missing %q:\n%s", want, content)
 		}
@@ -105,7 +109,7 @@ func TestViewRendersCompactContextBar(t *testing.T) {
 		Confidence: usage.ConfidenceExact,
 	}
 	content := (model{width: 64, results: []app.Result{{Snapshot: &snapshot}}}).View().Content
-	for _, want := range []string{"━", "75%", "total 350"} {
+	for _, want := range []string{"━", "75%", "spent 150", "processed 350"} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("compact context view missing %q:\n%s", want, content)
 		}
@@ -123,7 +127,7 @@ func TestViewExplainsMissingContextWithoutFabricatingZeroPercent(t *testing.T) {
 	}
 	content := (model{width: 64, results: []app.Result{{Snapshot: &snapshot}}}).View().Content
 	if !strings.Contains(content, "not reported") {
-		t.Fatalf("missing-context view lacks explanation:\n%s", content)
+		t.Fatalf("missing context/limit view lacks explanation:\n%s", content)
 	}
 	if strings.Contains(content, "0%") {
 		t.Fatalf("missing-context view fabricated a zero-percent context:\n%s", content)
@@ -197,8 +201,10 @@ func TestCompactCardMarksEstimatedMatches(t *testing.T) {
 		Confidence: usage.ConfidenceEstimated,
 	}
 	content := (model{width: 64, results: []app.Result{{Snapshot: &snapshot}}}).View().Content
-	if !strings.Contains(content, "idle·≈") {
-		t.Fatalf("compact estimated card lacks confidence marker:\n%s", content)
+	for _, want := range []string{"spent 150", "idle·≈", "ctx not reported", "limit not reported"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("compact estimated card lacks %q:\n%s", want, content)
+		}
 	}
 }
 
