@@ -22,7 +22,7 @@ func TestCollectExactSessionDeduplicatesAndNormalizesUsage(t *testing.T) {
 	configDir := filepath.Join("testdata", "config")
 	t.Setenv("CLAUDE_CONFIG_DIR", configDir)
 
-	collector := New(WithNow(func() time.Time { return fixtureNow }))
+	collector := newTestCollector(t, WithNow(func() time.Time { return fixtureNow }))
 	snapshot, err := collector.Collect(context.Background(), basecollector.Target{
 		PaneID:      "pane-1",
 		WorkspaceID: "workspace-1",
@@ -81,7 +81,7 @@ func TestCollectExactSessionDeduplicatesAndNormalizesUsage(t *testing.T) {
 }
 
 func TestCollectToleratesMissingCacheAndReasoningFields(t *testing.T) {
-	collector := New(
+	collector := newTestCollector(t,
 		WithConfigDir(filepath.Join("testdata", "config")),
 		WithNow(func() time.Time { return fixtureNow }),
 	)
@@ -100,7 +100,7 @@ func TestCollectToleratesMissingCacheAndReasoningFields(t *testing.T) {
 
 func TestCollectRejectsAmbiguousExactSessionWithoutLeakingPaths(t *testing.T) {
 	projectsDir := filepath.Join("testdata", "config", "projects")
-	collector := New(WithProjectsDir(projectsDir))
+	collector := newTestCollector(t, WithProjectsDir(projectsDir))
 	_, err := collector.Collect(context.Background(), basecollector.Target{SessionID: "duplicate-session"})
 	if !errors.Is(err, basecollector.ErrAmbiguous) {
 		t.Fatalf("error = %v, want ErrAmbiguous", err)
@@ -111,7 +111,7 @@ func TestCollectRejectsAmbiguousExactSessionWithoutLeakingPaths(t *testing.T) {
 }
 
 func TestCollectFallsBackToOnlyRecentTranscriptForCWD(t *testing.T) {
-	collector := New(
+	collector := newTestCollector(t,
 		WithProjectsDir(filepath.Join("testdata", "config", "projects")),
 		WithNow(func() time.Time { return fixtureNow }),
 		WithFallbackWindow(2*time.Hour),
@@ -149,7 +149,7 @@ func TestCollectCWDFallbackIgnoresNestedSubagentTranscripts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	collector := New(
+	collector := newTestCollector(t,
 		WithProjectsDir(projectsDir),
 		WithNow(func() time.Time { return fixtureNow }),
 	)
@@ -163,7 +163,7 @@ func TestCollectCWDFallbackIgnoresNestedSubagentTranscripts(t *testing.T) {
 }
 
 func TestCollectRejectsAmbiguousCWDFallback(t *testing.T) {
-	collector := New(
+	collector := newTestCollector(t,
 		WithProjectsDir(filepath.Join("testdata", "config", "projects")),
 		WithNow(func() time.Time { return fixtureNow }),
 	)
@@ -176,7 +176,7 @@ func TestCollectRejectsAmbiguousCWDFallback(t *testing.T) {
 }
 
 func TestCollectNeverFallsBackWhenSessionIDWasProvided(t *testing.T) {
-	collector := New(
+	collector := newTestCollector(t,
 		WithProjectsDir(filepath.Join("testdata", "config", "projects")),
 		WithNow(func() time.Time { return fixtureNow }),
 	)
@@ -190,7 +190,7 @@ func TestCollectNeverFallsBackWhenSessionIDWasProvided(t *testing.T) {
 }
 
 func TestCollectRequiresAbsoluteCWDForFallback(t *testing.T) {
-	collector := New(WithProjectsDir(filepath.Join("testdata", "config", "projects")))
+	collector := newTestCollector(t, WithProjectsDir(filepath.Join("testdata", "config", "projects")))
 	_, err := collector.Collect(context.Background(), basecollector.Target{CWD: "workspace/fallback"})
 	if !errors.Is(err, basecollector.ErrSessionNotFound) {
 		t.Fatalf("error = %v, want ErrSessionNotFound", err)
@@ -200,7 +200,7 @@ func TestCollectRequiresAbsoluteCWDForFallback(t *testing.T) {
 func TestCollectHonorsCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	collector := New(WithProjectsDir(filepath.Join("testdata", "config", "projects")))
+	collector := newTestCollector(t, WithProjectsDir(filepath.Join("testdata", "config", "projects")))
 	_, err := collector.Collect(ctx, basecollector.Target{SessionID: "session-main"})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v, want context.Canceled", err)
@@ -284,7 +284,7 @@ func TestCollectIncrementallyParsesAppendedTranscriptRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	collector := New(
+	collector := newTestCollector(t,
 		WithProjectsDir(projectsDir),
 		WithNow(func() time.Time { return fixtureNow }),
 	)
@@ -359,7 +359,7 @@ func TestCollectCheckpointsCompletePrefixBeforePartialTail(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	collector := New(WithProjectsDir(projectsDir))
+	collector := newTestCollector(t, WithProjectsDir(projectsDir))
 	target := basecollector.Target{Harness: "claude", SessionID: "session-partial"}
 	first, err := collector.Collect(context.Background(), target)
 	if err != nil {
@@ -434,7 +434,7 @@ func TestCollectInvalidatesCacheWhenTranscriptChangesGeneration(t *testing.T) {
 			if err := os.WriteFile(path, []byte(test.initial), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			collector := New(WithProjectsDir(projectsDir))
+			collector := newTestCollector(t, WithProjectsDir(projectsDir))
 			target := basecollector.Target{Harness: "claude", SessionID: "session-generation"}
 			if _, err := collector.Collect(context.Background(), target); err != nil {
 				t.Fatal(err)
@@ -472,7 +472,7 @@ func TestCollectSerializesConcurrentReadsOfGrowingTranscript(t *testing.T) {
 	if err := os.WriteFile(path, []byte(initial), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	collector := New(WithProjectsDir(projectsDir))
+	collector := newTestCollector(t, WithProjectsDir(projectsDir))
 	target := basecollector.Target{Harness: "claude", SessionID: "session-concurrent"}
 	if _, err := collector.Collect(context.Background(), target); err != nil {
 		t.Fatal(err)
@@ -545,6 +545,11 @@ func makeTranscriptPath(t *testing.T, sessionID string) (projectsDir, path strin
 		t.Fatal(err)
 	}
 	return projectsDir, filepath.Join(projectDir, sessionID+".jsonl")
+}
+
+func newTestCollector(t *testing.T, options ...Option) *Collector {
+	t.Helper()
+	return New(append(options, WithStatusDir(t.TempDir()))...)
 }
 
 func transcriptRecord(sessionID, messageID string, input, output uint64) string {

@@ -74,10 +74,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return nil
 	case "event":
 		return runEvent(ctx, stderr)
+	case "claude-statusline":
+		return claude.CaptureStatusLine(os.Stdin, stdout)
 	case "status":
 		return runStatus(ctx, args, stdout, stderr)
 	case "setup":
-		printSetup(stdout, resolveExternalConfigPath(ctx))
+		printSetup(stdout, resolveExternalConfigPath(ctx), executablePath())
 		return nil
 	case "contract", "external-contract":
 		printExternalContract(stdout)
@@ -96,7 +98,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 
 func newService(ctx context.Context) (*app.Service, error) {
 	collectors := []collector.Collector{
-		codex.New(codex.Config{AllowCWDRecencyFallback: true}),
+		codex.New(codex.Config{AllowCWDRecencyFallback: true, EnableAccountLimits: true}),
 		claude.New(),
 		opencode.New(opencode.Config{AllowDirectoryFallback: true}),
 	}
@@ -213,10 +215,10 @@ func printStatus(output io.Writer, results []app.Result) {
 		return
 	}
 	writer := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(writer, "HARNESS\tPANE\tMODEL\tTOTAL\tCONTEXT\tSTATE\tMATCH")
+	fmt.Fprintln(writer, "HARNESS\tPANE\tMODEL\tSPENT\tCONTEXT\tLIMIT\tSTATE\tMATCH")
 	for _, result := range results {
 		if result.Snapshot == nil {
-			fmt.Fprintf(writer, "%s\t%s\t—\t—\t—\t%s\t%s\n",
+			fmt.Fprintf(writer, "%s\t%s\t—\t—\tnot reported\tnot reported\t%s\t%s\n",
 				usage.SanitizeText(result.Target.Harness, 80),
 				usage.SanitizeText(result.Target.PaneID, 80),
 				usage.SanitizeText(result.Target.State, 80),
@@ -224,12 +226,13 @@ func printStatus(output io.Writer, results []app.Result) {
 			continue
 		}
 		snapshot := result.Snapshot
-		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			snapshot.Harness,
 			snapshot.PaneID,
 			defaultText(snapshot.Model, "—"),
-			usage.FormatCount(snapshot.Tokens.Total),
-			defaultText(snapshot.CompactContext(), "—"),
+			usage.FormatCount(snapshot.Tokens.Spent()),
+			defaultText(snapshot.CompactContext(), "not reported"),
+			defaultText(snapshot.CompactLimit(), "not reported"),
 			defaultText(snapshot.State, "unknown"),
 			snapshot.Confidence,
 		)
@@ -306,8 +309,9 @@ func resolveExternalConfigPath(ctx context.Context) string {
 	return external.DefaultConfigPath()
 }
 
-func printSetup(output io.Writer, configPath string) {
-	fmt.Fprintf(output, `Token Usage is local-only: it reads harness-owned usage stores and publishes compact metadata to Herdr.
+func printSetup(output io.Writer, configPath, executable string) {
+	statusCommand, _ := json.Marshal(shellWord(executable) + " claude-statusline")
+	fmt.Fprintf(output, `Token Usage reads privacy-filtered harness usage and publishes compact metadata to Herdr.
 
 1. Add the metadata tokens to your Agent sidebar layout in ~/.config/herdr/config.toml.
    The rows setting replaces the whole layout, so merge these $ fields into any rows you already customized:
@@ -317,7 +321,7 @@ rows = [
   ["state_icon", "workspace", "tab"],
   ["agent", "state_text"],
   ["$usage", "$context"],
-  ["$model"],
+  ["$limit", "$model"],
 ]
 
 For exact native session matching, make sure Herdr's harness integrations are installed:
@@ -327,7 +331,17 @@ herdr integration install codex
 herdr integration install opencode
 herdr integration status
 
-2. Optional: bind the popup dashboard:
+2. To let Claude report context and account limits, merge this into ~/.claude/settings.json.
+   Use the absolute executable path if token-usage is not on PATH:
+
+{
+  "statusLine": {
+    "type": "command",
+    "command": %s
+  }
+}
+
+3. Optional: bind the popup dashboard:
 
 [[keys.command]]
 key = "prefix+u"
@@ -335,7 +349,7 @@ type = "plugin_action"
 command = "token-usage.open"
 description = "token usage dashboard"
 
-3. Reload Herdr after editing config:
+4. Reload Herdr after editing config:
 
 herdr server reload-config
 
@@ -343,15 +357,15 @@ External collectors can be declared at:
 %s
 
 Run "token-usage contract" for the JSON protocol.
-`, configPath)
+`, statusCommand, configPath)
 }
 
 func printExternalContract(output io.Writer) {
-	fmt.Fprintln(output, `External collector contract (schema_version 1)
+	fmt.Fprintln(output, `External collector contract (schema_version 2)
 
 Create collectors.json:
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "collectors": {
     "aider": {
       "command": ["/absolute/path/to/aider-usage", "--json"],
@@ -362,7 +376,7 @@ Create collectors.json:
 
 The command receives this JSON on stdin:
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "target": {
     "pane_id": "w1:p1",
     "workspace_id": "w1",
@@ -382,7 +396,7 @@ The command receives this JSON on stdin:
 
 It returns one UsageSnapshot. Reasoning is a subset of output, not an extra addend:
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "harness": "aider",
   "session_id": "native-session-id",
   "model": "model-name",
@@ -395,6 +409,14 @@ It returns one UsageSnapshot. Reasoning is a subset of output, not an extra adde
     "total": 150
   },
   "context": {"used": 150, "limit": 128000},
+  "quota": {
+    "windows": [
+      {"label": "5h", "used_percent": 42, "resets_at": "2026-08-30T16:00:00Z"},
+      {"label": "7d", "used_percent": 73}
+    ],
+    "source": "aider-provider-limits",
+    "collected_at": "2026-08-30T12:00:00Z"
+  },
   "source": "aider-local-log",
   "confidence": "exact",
   "collected_at": "2026-08-30T12:00:00Z"
@@ -410,6 +432,7 @@ Commands:
   refresh             refresh sidebar metadata for active panes
   restore             republish metadata after Herdr starts
   event               refresh from a Herdr plugin event hook
+  claude-statusline   capture Claude context and account limits
   status [--json]     print a one-shot usage report
   setup               print sidebar and keybinding configuration
   contract            print the external collector JSON contract
@@ -438,4 +461,26 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func executablePath() string {
+	path, err := os.Executable()
+	if err != nil || strings.TrimSpace(path) == "" {
+		return "token-usage"
+	}
+	return filepath.Clean(path)
+}
+
+func shellWord(value string) string {
+	if value == "" {
+		return "token-usage"
+	}
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || strings.ContainsRune("/_+.,:@%-=", char) {
+			continue
+		}
+		return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+	}
+	return value
 }

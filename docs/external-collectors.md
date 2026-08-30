@@ -1,6 +1,6 @@
 # External collectors
 
-External collectors make another coding harness available without adding it to the Go binary. They are local subprocesses and use schema version 1.
+External collectors make another coding harness available without adding it to the Go binary. They are local subprocesses and use schema version 2. Version 1 collectors remain supported without quota fields.
 
 ## Configuration
 
@@ -8,7 +8,7 @@ Place `collectors.json` under `HERDR_PLUGIN_CONFIG_DIR`. Outside a plugin invoca
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "collectors": {
     "aider": {
       "command": ["/absolute/path/to/aider-usage", "--json"],
@@ -28,7 +28,7 @@ The command receives one JSON object on stdin:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "target": {
     "pane_id": "w1:p1",
     "workspace_id": "w1",
@@ -55,7 +55,7 @@ Write exactly one `UsageSnapshot` JSON object to stdout:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "harness": "aider",
   "session_id": "native-session-id",
   "model": "model-name",
@@ -72,6 +72,21 @@ Write exactly one `UsageSnapshot` JSON object to stdout:
     "used": 150,
     "limit": 128000
   },
+  "quota": {
+    "windows": [
+      {
+        "label": "5h",
+        "used_percent": 42,
+        "resets_at": "2026-08-30T16:00:00Z"
+      },
+      {
+        "label": "7d",
+        "used_percent": 73
+      }
+    ],
+    "source": "aider-provider-limits",
+    "collected_at": "2026-08-30T12:00:00Z"
+  },
   "source": "aider-local-log",
   "confidence": "exact",
   "collected_at": "2026-08-30T12:00:00Z"
@@ -79,6 +94,10 @@ Write exactly one `UsageSnapshot` JSON object to stdout:
 ```
 
 The plugin can fill a missing harness, session ID, source, confidence, or collection time from the trusted request boundary. If supplied, harness and session ID must match the request. The token arithmetic must validate exactly, context limit must be nonzero, and reasoning cannot exceed output.
+
+`quota` is optional in schema version 2. It contains one to sixteen uniquely labeled windows, a safe source label, and its own collection timestamp. `used_percent` is a finite percentage from 0 through 999 so spend-overage sources can report values above 100. `resets_at` is optional. Omit `quota` entirely when the harness cannot report account limits; do not estimate it from token totals.
+
+An existing version 1 `collectors.json` continues to receive version 1 requests and must return version 1 snapshots without `quota`. Change the configuration and collector response to version 2 together when adding quota support.
 
 ## Runtime limits
 

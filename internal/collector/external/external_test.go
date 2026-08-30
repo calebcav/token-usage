@@ -64,6 +64,56 @@ func TestCollectUsesVersionedJSONContract(t *testing.T) {
 	}
 }
 
+func TestCollectVersionTwoAcceptsQuota(t *testing.T) {
+	runner := &fakeRunner{stdout: []byte(`{
+      "schema_version":2,
+      "tokens":{"fresh_input":1,"cache_read":0,"cache_write":0,"output":1,"reasoning":0,"total":2},
+      "quota":{"windows":[{"label":"5h","used_percent":42}],"source":"aider-limits","collected_at":"2026-08-30T12:00:00Z"}
+    }`)}
+	item, err := New(Config{SchemaVersion: 2, Collectors: map[string]Command{
+		"aider": {Command: []string{"collector"}},
+	}}, WithRunner(runner), WithNow(func() time.Time { return time.Unix(500, 0).UTC() }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := item.Collect(context.Background(), collector.Target{Harness: "aider", SessionID: "s1", Confidence: usage.ConfidenceExact})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.SchemaVersion != usage.SchemaVersion || snapshot.Quota == nil || snapshot.CompactLimit() != "5h 42%" {
+		t.Fatalf("snapshot = %+v", snapshot)
+	}
+	var request Request
+	if err := json.Unmarshal(runner.input, &request); err != nil || request.SchemaVersion != 2 {
+		t.Fatalf("request = %+v, %v", request, err)
+	}
+}
+
+func TestCollectVersionOneRejectsQuota(t *testing.T) {
+	for name, quota := range map[string]string{
+		"object": `{"windows":[{"label":"5h","used_percent":42}],"source":"aider-limits","collected_at":"2026-08-30T12:00:00Z"}`,
+		"null":   `null`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			runner := &fakeRunner{stdout: []byte(`{
+          "schema_version":1,
+          "tokens":{"fresh_input":1,"cache_read":0,"cache_write":0,"output":1,"reasoning":0,"total":2},
+          "quota":` + quota + `
+        }`)}
+			item, err := New(Config{SchemaVersion: 1, Collectors: map[string]Command{
+				"aider": {Command: []string{"collector"}},
+			}}, WithRunner(runner))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = item.Collect(context.Background(), collector.Target{Harness: "aider", SessionID: "s1", Confidence: usage.ConfidenceExact})
+			if !errors.Is(err, collector.ErrMalformed) {
+				t.Fatalf("Collect() error = %v, want ErrMalformed", err)
+			}
+		})
+	}
+}
+
 func TestCollectRejectsSessionMismatch(t *testing.T) {
 	runner := &fakeRunner{stdout: []byte(`{
       "schema_version":1,"harness":"aider","session_id":"other","source":"test","confidence":"exact",

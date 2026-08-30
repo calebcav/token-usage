@@ -63,9 +63,14 @@ func (fakeCollector) Collect(_ context.Context, target collector.Target) (usage.
 		Model:         "gpt-5",
 		Tokens:        tokens,
 		Context:       &usage.ContextWindow{Used: 155, Limit: 1_000},
-		Source:        "fixture",
-		Confidence:    target.Confidence,
-		CollectedAt:   time.Unix(100, 0),
+		Quota: &usage.QuotaSnapshot{
+			Windows:     []usage.QuotaWindow{{Label: "5h", UsedPercent: 62}},
+			Source:      "fixture-quota",
+			CollectedAt: time.Unix(100, 0),
+		},
+		Source:      "fixture",
+		Confidence:  target.Confidence,
+		CollectedAt: time.Unix(100, 0),
 	}, nil
 }
 
@@ -120,11 +125,17 @@ func TestCollectPublishesSuccessAndClearsFailures(t *testing.T) {
 	if results[0].Snapshot.PaneID != "w1:p1" || results[0].Snapshot.State != "idle" {
 		t.Fatalf("snapshot was not enriched: %+v", results[0].Snapshot)
 	}
-	if value := client.report("w1:p1").Tokens["usage"]; value == nil || *value != "Σ 155" {
+	if value := client.report("w1:p1").Tokens["usage"]; value == nil || *value != "Σ 130" {
 		t.Fatalf("usage metadata = %v", value)
+	}
+	if value := client.report("w1:p1").Tokens["limit"]; value == nil || *value != "5h 62%" {
+		t.Fatalf("limit metadata = %v", value)
 	}
 	if value := client.report("w1:p2").Tokens["usage"]; value != nil {
 		t.Fatalf("failed collector should clear usage, got %v", *value)
+	}
+	if value := client.report("w1:p2").Tokens["limit"]; value != nil {
+		t.Fatalf("failed collector should clear limit, got %v", *value)
 	}
 }
 

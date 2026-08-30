@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/singleflight"
 	_ "modernc.org/sqlite"
 
 	basecollector "github.com/calebcav/token-usage/internal/collector"
@@ -52,12 +53,26 @@ type Config struct {
 
 	// FallbackWindow bounds directory-only matching. Zero uses two hours.
 	FallbackWindow time.Duration
+
+	// ContextResolver resolves runtime OpenCode model limits. Nil uses the
+	// OpenCode CLI configured by OPENCODE_BIN_PATH.
+	ContextResolver ContextLimitResolver
+
+	// ContextCacheDir overrides the persistent context-limit cache directory.
+	// Empty uses os.UserCacheDir()/token-usage.
+	ContextCacheDir string
+
+	// Clock overrides wall-clock access for collection and cache expiry.
+	Clock func() time.Time
 }
 
 // Collector reads OpenCode's aggregate per-session counters.
 type Collector struct {
-	config Config
-	now    func() time.Time
+	config          Config
+	now             func() time.Time
+	contextResolver ContextLimitResolver
+	contextCacheDir string
+	contextGroup    singleflight.Group
 }
 
 var _ basecollector.Collector = (*Collector)(nil)
@@ -65,9 +80,23 @@ var _ basecollector.Collector = (*Collector)(nil)
 // New creates an OpenCode collector. It does not open the database until
 // Collect is called.
 func New(config Config) *Collector {
+	now := config.Clock
+	if now == nil {
+		now = time.Now
+	}
+	resolver := config.ContextResolver
+	if resolver == nil {
+		resolver = newCommandContextLimitResolver()
+	}
+	cacheDir := strings.TrimSpace(config.ContextCacheDir)
+	if cacheDir == "" {
+		cacheDir = defaultContextCacheDir()
+	}
 	return &Collector{
-		config: config,
-		now:    time.Now,
+		config:          config,
+		now:             now,
+		contextResolver: resolver,
+		contextCacheDir: cacheDir,
 	}
 }
 
@@ -168,6 +197,11 @@ func (c *Collector) Collect(ctx context.Context, target basecollector.Target) (u
 		Source:        sourceName,
 		Confidence:    confidence,
 		CollectedAt:   c.now().UTC(),
+	}
+	if message, ok := latestMessageContext(ctx, db, record.ID); ok {
+		if limit, ok := c.resolveContextLimit(ctx, record.Directory, message.Provider, message.Model); ok {
+			snapshot.Context = &usage.ContextWindow{Used: message.Used, Limit: limit}
+		}
 	}
 	if err := snapshot.Validate(); err != nil {
 		return usage.Snapshot{}, fmt.Errorf("%w: invalid OpenCode snapshot", basecollector.ErrMalformed)

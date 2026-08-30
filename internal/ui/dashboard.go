@@ -17,8 +17,9 @@ import (
 
 const (
 	refreshInterval    = 5 * time.Second
-	wideLayoutMinWidth = 92
+	wideLayoutMinWidth = 100
 	miniBarWidth       = 14
+	compactLimitWidth  = 12
 )
 
 type model struct {
@@ -191,7 +192,7 @@ func (m model) visibleRange(width int) (int, int) {
 		lipgloss.Height(renderTotals(m.results, width)) + 1 +
 		listHeaderRows +
 		lipgloss.Height(m.renderDetail(width)) +
-		lipgloss.Height(m.renderFooter(width)) + 2
+		lipgloss.Height(m.renderFooter(width)) + 3
 	visible := max(1, (m.height-fixedRows)/linesPerResult)
 	if visible >= count {
 		return 0, count
@@ -209,7 +210,7 @@ func (m model) visibleRange(width int) (int, int) {
 }
 
 func (m model) subtitle() string {
-	parts := []string{"local only", fmt.Sprintf("%d session%s", len(m.results), plural(len(m.results)))}
+	parts := []string{"private", fmt.Sprintf("%d session%s", len(m.results), plural(len(m.results)))}
 	if !m.lastRefresh.IsZero() {
 		parts = append(parts, "updated "+m.lastRefresh.Format("15:04:05"))
 	}
@@ -254,7 +255,7 @@ func footerForWidth(width int) string {
 }
 
 func renderTotals(results []app.Result, width int) string {
-	var input, cache, output, total uint64
+	var input, cacheRead, output, spent uint64
 	var successes int
 	for _, result := range results {
 		if result.Snapshot == nil {
@@ -262,12 +263,12 @@ func renderTotals(results []app.Result, width int) string {
 		}
 		successes++
 		input += result.Snapshot.Tokens.FreshInput
-		cache += result.Snapshot.Tokens.CacheRead + result.Snapshot.Tokens.CacheWrite
+		cacheRead += result.Snapshot.Tokens.CacheRead
 		output += result.Snapshot.Tokens.Output
-		total += result.Snapshot.Tokens.Total
+		spent += result.Snapshot.Tokens.Spent()
 	}
-	value := fmt.Sprintf("TOTAL  %s    FRESH INPUT  %s    CACHE  %s    OUTPUT  %s",
-		usage.FormatCount(total), usage.FormatCount(input), usage.FormatCount(cache), usage.FormatCount(output))
+	value := fmt.Sprintf("SPENT  %s    FRESH INPUT  %s    CACHE READ  %s    OUTPUT  %s",
+		usage.FormatCount(spent), usage.FormatCount(input), usage.FormatCount(cacheRead), usage.FormatCount(output))
 	if successes == 0 {
 		value = "No usage snapshots available"
 	}
@@ -280,6 +281,7 @@ func (m model) renderTable(width int) string {
 		paneWidth       = 10
 		modelWidth      = 16
 		contextWidth    = miniBarWidth + 5
+		limitWidth      = compactLimitWidth
 		countWidth      = 8
 		stateWidth      = 8
 		confidenceWidth = 9
@@ -289,7 +291,8 @@ func (m model) renderTable(width int) string {
 		padRight("PANE", paneWidth) + " " +
 		padRight("MODEL", modelWidth) + " " +
 		padRight("CONTEXT", contextWidth) + " " +
-		padLeft("TOTAL", countWidth) + " " +
+		padRight("LIMIT", limitWidth) + " " +
+		padLeft("SPENT", countWidth) + " " +
 		padRight("STATE", stateWidth) + " " +
 		padRight("MATCH", confidenceWidth)
 	var rows []string
@@ -313,7 +316,8 @@ func (m model) renderTable(width int) string {
 				padRight(clip(snapshot.PaneID, paneWidth), paneWidth) + " " +
 				padRight(clip(defaultValue(snapshot.Model, "—"), modelWidth), modelWidth) + " " +
 				padRight(renderCompactContext(snapshot.Context, miniBarWidth, index != m.selected), contextWidth) + " " +
-				padLeft(usage.FormatCount(snapshot.Tokens.Total), countWidth) + " " +
+				padRight(renderCompactLimit(snapshot, index != m.selected), limitWidth) + " " +
+				padLeft(usage.FormatCount(snapshot.Tokens.Spent()), countWidth) + " " +
 				padRight(clip(defaultValue(snapshot.State, "unknown"), stateWidth), stateWidth) + " " +
 				padRight(renderConfidence(snapshot.Confidence, index != m.selected), confidenceWidth)
 		}
@@ -380,12 +384,25 @@ func (m model) renderDetail(width int) string {
 			muted.Render(wrapWords(contextUsageLine(snapshot.Context), innerWidth)),
 		)
 	}
+	if snapshot.Quota == nil || len(snapshot.Quota.Windows) == 0 {
+		if innerWidth < 44 {
+			lines = append(lines, label.Render("LIMITS")+"  "+muted.Render("not reported"))
+		} else {
+			lines = append(lines, label.Render("ACCOUNT LIMITS")+"  "+muted.Render("not reported by this harness"))
+		}
+	} else {
+		lines = append(lines, label.Render("ACCOUNT LIMITS"))
+		for _, window := range snapshot.Quota.Windows {
+			lines = append(lines, wrapWords(quotaWindowLine(window), innerWidth))
+		}
+	}
 	tokenParts := []string{
 		"fresh input " + usage.FormatCount(snapshot.Tokens.FreshInput),
 		"cache read " + usage.FormatCount(snapshot.Tokens.CacheRead),
 		"cache write " + usage.FormatCount(snapshot.Tokens.CacheWrite),
 		"output " + usage.FormatCount(snapshot.Tokens.Output),
-		"total " + usage.FormatCount(snapshot.Tokens.Total),
+		"spent " + usage.FormatCount(snapshot.Tokens.Spent()),
+		"processed " + usage.FormatCount(snapshot.Tokens.Total),
 	}
 	metaParts := make([]string, 0, 3)
 	if snapshot.Tokens.Reasoning > 0 {
@@ -401,7 +418,8 @@ func (m model) renderDetail(width int) string {
 
 func renderCardContext(snapshot *usage.Snapshot, width int) string {
 	const indent = "    "
-	total := "total " + usage.FormatCount(snapshot.Tokens.Total)
+	spent := "spent " + usage.FormatCount(snapshot.Tokens.Spent())
+	limit := compactCardLimit(snapshot)
 	meta := compactCardMeta(snapshot)
 	matchPrefix := ""
 	if snapshot.Confidence == usage.ConfidenceEstimated {
@@ -409,19 +427,20 @@ func renderCardContext(snapshot *usage.Snapshot, width int) string {
 	}
 	if snapshot.Context == nil || snapshot.Context.Limit == 0 {
 		if width < 42 {
-			line := clip(matchPrefix+"ctx n/a  "+total, max(1, width-lipgloss.Width(indent)))
+			line := clip(matchPrefix+spent+"  "+meta+"  context not reported  "+limit, max(1, width-lipgloss.Width(indent)))
 			return indent + muted.Render(line)
 		}
-		return indent + muted.Render("context n/a  •  "+total+"  •  "+meta)
+		line := spent + "  " + meta + "  ctx not reported  " + limit
+		return indent + muted.Render(clip(line, max(1, width-lipgloss.Width(indent))))
 	}
 	percent := displayPercent(snapshot.Context.Percent())
 	if width < 36 {
-		line := clip(matchPrefix+"ctx "+percent+"  "+total, max(1, width-lipgloss.Width(indent)))
+		line := clip(matchPrefix+spent+"  ctx "+percent+"  "+limit, max(1, width-lipgloss.Width(indent)))
 		return indent + contextStyle(snapshot.Context.Percent()).Render(line)
 	}
-	barWidth := min(16, max(4, width-lipgloss.Width(indent)-lipgloss.Width(percent)-lipgloss.Width(total)-lipgloss.Width(meta)-8))
+	barWidth := min(16, max(4, width-lipgloss.Width(indent)-lipgloss.Width(percent)-lipgloss.Width(limit)-lipgloss.Width(spent)-lipgloss.Width(meta)-10))
 	return indent + renderContextBar(snapshot.Context, barWidth) + " " +
-		contextStyle(snapshot.Context.Percent()).Render(percent) + "  " + total + "  " + meta
+		contextStyle(snapshot.Context.Percent()).Render(percent) + "  " + spent + "  " + meta + "  " + limit
 }
 
 func compactCardMeta(snapshot *usage.Snapshot) string {
@@ -445,6 +464,37 @@ func renderCompactContext(window *usage.ContextWindow, barWidth int, styled bool
 	}
 	return renderContextBar(window, barWidth) + " " +
 		contextStyle(window.Percent()).Render(displayPercent(window.Percent()))
+}
+
+func renderCompactLimit(snapshot *usage.Snapshot, styled bool) string {
+	window, ok := snapshot.MostConstrainedQuota()
+	if !ok {
+		value := "not reported"
+		if !styled {
+			return value
+		}
+		return muted.Render(value)
+	}
+	value := clip(window.Label+" "+displayPercent(window.UsedPercent), compactLimitWidth)
+	if !styled {
+		return value
+	}
+	return contextStyle(window.UsedPercent).Render(value)
+}
+
+func compactCardLimit(snapshot *usage.Snapshot) string {
+	if value := snapshot.CompactLimit(); value != "" {
+		return "limit " + clip(value, 20)
+	}
+	return "limit not reported"
+}
+
+func quotaWindowLine(window usage.QuotaWindow) string {
+	value := window.Label + " " + displayPercent(window.UsedPercent) + " used"
+	if window.ResetsAt != nil {
+		value += "  •  resets " + window.ResetsAt.Local().Format("Jan 2 15:04 MST")
+	}
+	return contextStyle(window.UsedPercent).Render(value)
 }
 
 func renderContextBar(window *usage.ContextWindow, width int) string {

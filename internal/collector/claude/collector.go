@@ -34,6 +34,7 @@ const (
 type Collector struct {
 	configDir      string
 	projectsDir    string
+	statusDir      string
 	fallbackWindow time.Duration
 	now            func() time.Time
 	cacheMu        sync.Mutex
@@ -58,6 +59,14 @@ func WithConfigDir(path string) Option {
 func WithProjectsDir(path string) Option {
 	return func(c *Collector) {
 		c.projectsDir = path
+	}
+}
+
+// WithStatusDir directly specifies the directory containing normalized Claude
+// status-line state. This is primarily useful for tests and isolated installs.
+func WithStatusDir(path string) Option {
+	return func(c *Collector) {
+		c.statusDir = path
 	}
 }
 
@@ -135,6 +144,7 @@ func (c *Collector) Collect(ctx context.Context, target basecollector.Target) (u
 	if c != nil && c.now != nil {
 		now = c.now
 	}
+	collectedAt := now().UTC()
 	snapshot := usage.Snapshot{
 		SchemaVersion:  usage.SchemaVersion,
 		PaneID:         target.PaneID,
@@ -147,8 +157,13 @@ func (c *Collector) Collect(ctx context.Context, target basecollector.Target) (u
 		Tokens:         tokens,
 		Source:         sourceName,
 		Confidence:     resolved.confidence,
-		CollectedAt:    now().UTC(),
+		CollectedAt:    collectedAt,
 	}
+	var transcriptUpdatedAt time.Time
+	if info, err := os.Stat(resolved.path); err == nil {
+		transcriptUpdatedAt = info.ModTime()
+	}
+	snapshot.Context, snapshot.Quota = c.loadStatusState(resolved.sessionID, collectedAt, transcriptUpdatedAt)
 	if err := snapshot.Validate(); err != nil {
 		return usage.Snapshot{}, safeError(basecollector.ErrMalformed)
 	}

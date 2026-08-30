@@ -64,6 +64,12 @@ func (t Tokens) Validate() error {
 	return nil
 }
 
+// Spent returns fresh input and output tokens for the session. Cache activity
+// remains available in the detailed breakdown but does not inflate this metric.
+func (t Tokens) Spent() uint64 {
+	return t.FreshInput + t.Output
+}
+
 func add(values ...uint64) (uint64, bool) {
 	var total uint64
 	for _, value := range values {
@@ -87,6 +93,18 @@ func (c ContextWindow) Percent() float64 {
 	return float64(c.Used) / float64(c.Limit) * 100
 }
 
+type QuotaWindow struct {
+	Label       string     `json:"label"`
+	UsedPercent float64    `json:"used_percent"`
+	ResetsAt    *time.Time `json:"resets_at,omitempty"`
+}
+
+type QuotaSnapshot struct {
+	Windows     []QuotaWindow `json:"windows"`
+	Source      string        `json:"source"`
+	CollectedAt time.Time     `json:"collected_at"`
+}
+
 // Snapshot is the single contract consumed by every renderer and external
 // collector. Source is a safe source kind such as "codex-rollout"; it must not
 // contain a transcript path or other user content.
@@ -102,12 +120,13 @@ type Snapshot struct {
 	State          string         `json:"state,omitempty"`
 	Tokens         Tokens         `json:"tokens"`
 	Context        *ContextWindow `json:"context,omitempty"`
+	Quota          *QuotaSnapshot `json:"quota,omitempty"`
 	Source         string         `json:"source"`
 	Confidence     Confidence     `json:"confidence"`
 	CollectedAt    time.Time      `json:"collected_at"`
 }
 
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 func (s Snapshot) Validate() error {
 	if s.SchemaVersion != SchemaVersion {
@@ -149,6 +168,36 @@ func (s Snapshot) Validate() error {
 	}
 	if s.Context != nil && s.Context.Limit == 0 {
 		return errors.New("context window limit must be greater than zero")
+	}
+	if s.Quota != nil {
+		if len(s.Quota.Windows) == 0 || len(s.Quota.Windows) > 16 {
+			return errors.New("quota must contain between 1 and 16 windows")
+		}
+		if strings.TrimSpace(s.Quota.Source) == "" || !isSafeSource(s.Quota.Source) {
+			return errors.New("quota source must be a safe source label")
+		}
+		if s.Quota.CollectedAt.IsZero() {
+			return errors.New("quota collected_at is required")
+		}
+		seen := make(map[string]struct{}, len(s.Quota.Windows))
+		for _, window := range s.Quota.Windows {
+			label := strings.TrimSpace(window.Label)
+			if label == "" || !validDisplayText(label, 32) {
+				return errors.New("quota window label is invalid")
+			}
+			if _, exists := seen[label]; exists {
+				return fmt.Errorf("quota window label %q is duplicated", label)
+			}
+			seen[label] = struct{}{}
+			if math.IsNaN(window.UsedPercent) || math.IsInf(window.UsedPercent, 0) || window.UsedPercent < 0 || window.UsedPercent > 999 {
+				return fmt.Errorf("quota window %q percentage is invalid", label)
+			}
+			if window.ResetsAt != nil {
+				if _, err := window.ResetsAt.MarshalJSON(); err != nil {
+					return fmt.Errorf("quota window %q reset time is invalid", label)
+				}
+			}
+		}
 	}
 	return nil
 }
@@ -221,7 +270,7 @@ func trimDecimal(value float64) string {
 }
 
 func (s Snapshot) CompactUsage() string {
-	return "Σ " + FormatCount(s.Tokens.Total)
+	return "Σ " + FormatCount(s.Tokens.Spent())
 }
 
 func (s Snapshot) CompactContext() string {
@@ -229,4 +278,25 @@ func (s Snapshot) CompactContext() string {
 		return ""
 	}
 	return fmt.Sprintf("ctx %.0f%% · %s/%s", s.Context.Percent(), FormatCount(s.Context.Used), FormatCount(s.Context.Limit))
+}
+
+func (s Snapshot) CompactLimit() string {
+	window, ok := s.MostConstrainedQuota()
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf("%s %.0f%%", window.Label, window.UsedPercent)
+}
+
+func (s Snapshot) MostConstrainedQuota() (QuotaWindow, bool) {
+	if s.Quota == nil || len(s.Quota.Windows) == 0 {
+		return QuotaWindow{}, false
+	}
+	selected := s.Quota.Windows[0]
+	for _, window := range s.Quota.Windows[1:] {
+		if window.UsedPercent > selected.UsedPercent {
+			selected = window
+		}
+	}
+	return selected, true
 }
