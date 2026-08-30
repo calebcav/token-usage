@@ -361,7 +361,7 @@ func (c *Collector) loadStatusState(sessionID string, now time.Time, transcriptU
 	if state.CollectedAt.IsZero() || age < -maxFutureClockSkew {
 		return nil, nil
 	}
-	contextIsStale := len(transcriptUpdatedAt) > 0 && !transcriptUpdatedAt[0].IsZero() && info.ModTime().Before(transcriptUpdatedAt[0])
+	contextIsStale := len(transcriptUpdatedAt) > 0 && !transcriptUpdatedAt[0].IsZero() && state.CollectedAt.Before(transcriptUpdatedAt[0])
 
 	var contextWindow *usage.ContextWindow
 	if !contextIsStale && len(state.Context) != 0 && string(state.Context) != "null" {

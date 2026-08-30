@@ -159,9 +159,14 @@ func (c *Collector) Collect(ctx context.Context, target basecollector.Target) (u
 		Confidence:     resolved.confidence,
 		CollectedAt:    collectedAt,
 	}
-	var transcriptUpdatedAt time.Time
-	if info, err := os.Stat(resolved.path); err == nil {
-		transcriptUpdatedAt = info.ModTime()
+	transcriptUpdatedAt := parsed.updatedAt
+	if transcriptUpdatedAt.IsZero() || parsed.timestampsIncomplete {
+		// Older or synthetic transcripts may omit record timestamps. Fall back to
+		// the filesystem clock conservatively, but prefer logical record time so a
+		// harmless touch does not invalidate otherwise-current status-line state.
+		if info, err := os.Stat(resolved.path); err == nil {
+			transcriptUpdatedAt = info.ModTime()
+		}
 	}
 	snapshot.Context, snapshot.Quota = c.loadStatusState(resolved.sessionID, collectedAt, transcriptUpdatedAt)
 	if err := snapshot.Validate(); err != nil {
@@ -397,11 +402,13 @@ type rawMessage struct {
 }
 
 type parsedTranscript struct {
-	messages  map[string]messageUsage
-	sessionID string
-	model     string
-	version   string
-	valid     bool
+	messages             map[string]messageUsage
+	sessionID            string
+	model                string
+	version              string
+	updatedAt            time.Time
+	timestampsIncomplete bool
+	valid                bool
 }
 
 type transcriptCache struct {
@@ -521,6 +528,13 @@ func consumeTranscriptLine(parsed *parsedTranscript, line []byte, lineNumber int
 	if err := json.Unmarshal(line, &envelope); err != nil {
 		return errMalformedLine
 	}
+	if timestamp, err := time.Parse(time.RFC3339Nano, envelope.Timestamp); err == nil && !timestamp.IsZero() {
+		if timestamp.After(parsed.updatedAt) {
+			parsed.updatedAt = timestamp
+		}
+	} else if transcriptRecordNeedsTimestamp(envelope.Type) {
+		parsed.timestampsIncomplete = true
+	}
 	sessionID := parsed.sessionID
 	if envelope.SessionID != "" {
 		if sessionID != "" && sessionID != envelope.SessionID {
@@ -584,6 +598,19 @@ func consumeTranscriptLine(parsed *parsedTranscript, line []byte, lineNumber int
 		parsed.messages[key] = candidate
 	}
 	return nil
+}
+
+func transcriptRecordNeedsTimestamp(recordType string) bool {
+	// Claude writes these local bookkeeping records without timestamps. They do
+	// not represent new model context, so their presence must not force the
+	// collector back to filesystem mtime freshness. Unknown record types remain
+	// conservative in case a future Claude version adds context-bearing data.
+	switch recordType {
+	case "ai-title", "file-history-snapshot", "last-prompt", "mode", "permission-mode":
+		return false
+	default:
+		return true
+	}
 }
 
 func cloneParsedTranscript(value parsedTranscript) parsedTranscript {

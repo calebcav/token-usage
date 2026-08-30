@@ -337,9 +337,13 @@ herdr integration status
 {
   "statusLine": {
     "type": "command",
-    "command": %s
+    "command": %s,
+    "refreshInterval": 60
   }
 }
+
+Claude reports context and account limits after the session receives its first API response.
+Until then, "not reported" is expected.
 
 3. Optional: bind the popup dashboard:
 
