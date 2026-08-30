@@ -1,0 +1,6 @@
+{"timestamp":"2026-08-30T12:00:00Z","type":"session_meta","payload":{"id":"11111111-1111-4111-8111-111111111111","timestamp":"2026-08-30T12:00:00Z","cwd":"/fixtures/project","cli_version":"0.fixture.1","model_provider":"openai"}}
+{"timestamp":"2026-08-30T12:00:01Z","type":"turn_context","payload":{"model":"gpt-fixture"}}
+{"timestamp":"2026-08-30T12:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":20,"output_tokens":10,"reasoning_output_tokens":4,"total_tokens":110},"last_token_usage":{"input_tokens":60,"cached_input_tokens":10,"output_tokens":8,"reasoning_output_tokens":3,"total_tokens":68},"model_context_window":200}}}
+{"timestamp":"2026-08-30T12:00:03Z","type":"event_msg","payload":{"type":"task_complete"}}
+{"timestamp":"2026-08-30T12:00:04Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":250,"cached_input_tokens":80,"cache_write_input_tokens":20,"output_tokens":50,"reasoning_output_tokens":15,"total_tokens":300},"last_token_usage":{"input_tokens":120,"cached_input_tokens":40,"cache_write_input_tokens":10,"output_tokens":30,"reasoning_output_tokens":10,"total_tokens":150},"model_context_window":400}}}
+{"timestamp":"2026-08-30T12:00:05Z","type":"event_msg"

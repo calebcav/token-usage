@@ -1,0 +1,1 @@
+{"type":"assistant","sessionId":"fallback-ambiguous-b","cwd":"/workspace/ambiguous","timestamp":"2026-08-30T11:41:00Z","message":{"id":"ambiguous-message-b","role":"assistant","usage":{"input_tokens":1,"output_tokens":1}}}

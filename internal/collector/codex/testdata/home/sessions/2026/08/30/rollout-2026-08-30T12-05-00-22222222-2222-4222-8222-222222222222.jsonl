@@ -1,0 +1,2 @@
+{"timestamp":"2026-08-30T12:05:00Z","type":"session_meta","payload":{"id":"22222222-2222-4222-8222-222222222222","timestamp":"2026-08-30T12:05:00Z","cwd":"/fixtures/minimal","cli_version":"0.fixture.0"}}
+{"timestamp":"2026-08-30T12:05:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":7,"output_tokens":3,"total_tokens":10},"last_token_usage":{"input_tokens":5,"output_tokens":1},"model_context_window":100}}}

@@ -1,0 +1,6 @@
+/bin/*
+!/bin/.gitkeep
+/coverage.out
+/herdr-token-usage-plan.html
+*.prof
+.DS_Store

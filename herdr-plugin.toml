@@ -1,0 +1,44 @@
+id = "token-usage"
+name = "Token Usage"
+version = "0.1.0"
+min_herdr_version = "0.8.2"
+description = "Local token usage for Codex, Claude Code, OpenCode, and custom coding harnesses."
+platforms = ["linux", "macos"]
+
+[[build]]
+command = ["go", "build", "-trimpath", "-ldflags", "-s -w -X main.version=0.1.0", "-o", "bin/token-usage", "./cmd/token-usage"]
+
+[[startup]]
+command = ["./bin/token-usage", "restore"]
+
+[[actions]]
+id = "open"
+title = "Open token usage"
+description = "Open the token usage dashboard."
+command = ["./bin/token-usage", "open"]
+
+[[actions]]
+id = "refresh"
+title = "Refresh token usage"
+description = "Refresh usage metadata for active coding-agent panes."
+command = ["./bin/token-usage", "refresh"]
+
+[[events]]
+on = "pane.agent_detected"
+command = ["./bin/token-usage", "event"]
+
+[[events]]
+on = "pane.agent_status_changed"
+command = ["./bin/token-usage", "event"]
+
+[[events]]
+on = "pane.focused"
+command = ["./bin/token-usage", "event"]
+
+[[panes]]
+id = "dashboard"
+title = "Token Usage"
+placement = "popup"
+width = "90%"
+height = "80%"
+command = ["./bin/token-usage", "dashboard"]

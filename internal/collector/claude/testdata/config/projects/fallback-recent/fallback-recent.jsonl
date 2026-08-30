@@ -1,0 +1,2 @@
+{"type":"user","sessionId":"fallback-recent","cwd":"/workspace/fallback","timestamp":"2026-08-30T11:45:00Z","message":{"role":"user","content":"sanitized"}}
+{"type":"assistant","sessionId":"fallback-recent","cwd":"/workspace/fallback","timestamp":"2026-08-30T11:46:00Z","message":{"id":"fallback-message","role":"assistant","model":"claude-opus-4-1-20250805","usage":{"input_tokens":20,"cache_read_input_tokens":30,"output_tokens":10}}}

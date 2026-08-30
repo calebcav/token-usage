@@ -1,0 +1,1 @@
+{"type":"assistant","sessionId":"session-missing-fields","cwd":"/workspace/missing-fields","version":"2.0.0","timestamp":"2026-08-30T09:00:00Z","message":{"id":"message-minimal","role":"assistant","model":"claude-haiku-4-5-20251001","usage":{"input_tokens":11,"output_tokens":7}}}

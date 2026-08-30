@@ -1,0 +1,1 @@
+{"type":"assistant","sessionId":"fallback-old","cwd":"/workspace/fallback","timestamp":"2026-08-29T08:00:00Z","message":{"id":"old-message","role":"assistant","usage":{"input_tokens":900,"output_tokens":900}}}
