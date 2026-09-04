@@ -145,7 +145,7 @@ The human-facing `SPENT` and sidebar `Σ` values report fresh input + output. Ca
 | OpenCode | Local `opencode.db` SQLite store, pure model metadata command | Adds OpenCode's raw input, cache, output, and reasoning counters; the database is opened read-only. |
 | Pi | `~/.pi/agent/sessions` JSONL sessions | Sums usage on the active session branch, including assistant/tool-result usage and compaction/branch-summary generation usage. |
 
-An exact native session ID always wins. Without one, cwd fallback is labeled `estimated`. Codex, Claude, and OpenCode require an unambiguous recent match; Pi prefers the uniquely newest recent session because Herdr does not yet publish Pi's native session ID, but still rejects tied candidates. Exact matching is also used when Token Usage runs inside the focused Pi session and can verify Pi's session environment and cwd.
+An exact native session reference always wins. Without one, cwd fallback is labeled `estimated`. Codex, Claude, and OpenCode require an unambiguous recent match; Pi uses Herdr's authoritative session-file reference when available and otherwise prefers the uniquely newest recent session while rejecting tied candidates. Exact ID matching is also used when Token Usage runs inside the focused Pi session and can verify Pi's session environment and cwd.
 
 ## Add another harness
 

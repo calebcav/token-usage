@@ -135,6 +135,38 @@ func TestFocusedPiTargetUsesLocalSessionEnvironment(t *testing.T) {
 	}
 }
 
+func TestSnapshotKeepsPathSessionReferenceOutOfSessionID(t *testing.T) {
+	snapshot := Snapshot{
+		Protocol: 20,
+		Agents: []Record{{
+			PaneID:      "w1:p1",
+			WorkspaceID: "w1",
+			Agent:       "pi",
+			AgentSession: &SessionRef{
+				Source: "herdr:pi",
+				Agent:  "pi",
+				Kind:   "path",
+				Value:  "/home/user/.pi/agent/sessions/project/session.jsonl",
+			},
+		}},
+	}
+
+	targets := snapshot.Targets()
+	if len(targets) != 1 {
+		t.Fatalf("Targets() len = %d, want 1", len(targets))
+	}
+	target := targets[0]
+	if target.SessionID != "" {
+		t.Fatalf("SessionID = %q, want empty for a path reference", target.SessionID)
+	}
+	if target.SessionRef == nil || target.SessionRef.Kind != "path" || target.SessionRef.Value != "/home/user/.pi/agent/sessions/project/session.jsonl" {
+		t.Fatalf("session ref = %+v", target.SessionRef)
+	}
+	if target.Confidence != usage.ConfidenceExact {
+		t.Fatalf("confidence = %q, want exact", target.Confidence)
+	}
+}
+
 func TestReportMetadataUsesStablePatchArguments(t *testing.T) {
 	runner := &fakeRunner{}
 	client := &Client{Binary: "herdr-test", Runner: runner}

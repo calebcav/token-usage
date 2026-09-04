@@ -112,6 +112,45 @@ func TestFileSnapshotCacheDoesNotExtendQuotaSourceTTL(t *testing.T) {
 	}
 }
 
+func TestFileSnapshotCacheBindsHashedPathSessionReference(t *testing.T) {
+	now := time.Date(2026, 9, 4, 3, 0, 0, 0, time.UTC)
+	cache := &FileSnapshotCache{Directory: t.TempDir(), Now: func() time.Time { return now }}
+	sessionPath := "/private/.pi/agent/sessions/project/session-one.jsonl"
+	target := collector.Target{
+		PaneID:      "w1:p1",
+		WorkspaceID: "w1",
+		Harness:     "pi",
+		SessionRef:  &collector.SessionRef{Source: "herdr:pi", Agent: "pi", Kind: "path", Value: sessionPath},
+		Confidence:  usage.ConfidenceExact,
+	}
+	snapshot := cachedTestSnapshot(now)
+	snapshot.Harness = "pi"
+
+	if err := cache.Store(target, snapshot); err != nil {
+		t.Fatalf("Store() error = %v", err)
+	}
+	if _, ok := cache.Load(target, time.Minute); !ok {
+		t.Fatal("Load() missed matching path reference")
+	}
+	cachePath, _, ok := cache.path(target)
+	if !ok {
+		t.Fatal("cache path is unavailable")
+	}
+	data, err := os.ReadFile(cachePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), sessionPath) {
+		t.Fatal("cache persisted plaintext session path")
+	}
+
+	changed := target
+	changed.SessionRef = &collector.SessionRef{Source: "herdr:pi", Agent: "pi", Kind: "path", Value: "/private/.pi/agent/sessions/project/session-two.jsonl"}
+	if _, ok := cache.Load(changed, time.Minute); ok {
+		t.Fatal("Load() returned snapshot for a different path reference")
+	}
+}
+
 func TestFileSnapshotCacheTreatsMalformedEntryAsMiss(t *testing.T) {
 	cache := &FileSnapshotCache{Directory: t.TempDir()}
 	target := collector.Target{PaneID: "w1:p1", Harness: "codex", SessionID: "session-1"}

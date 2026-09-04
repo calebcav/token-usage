@@ -61,6 +61,44 @@ func TestCollectExactSessionSumsActivePathUsage(t *testing.T) {
 	}
 }
 
+func TestCollectExactSessionPath(t *testing.T) {
+	root := t.TempDir()
+	path := writePiSession(t, root, "proj", `
+{"type":"session","version":3,"id":"session-path","timestamp":"2026-09-04T00:00:00.000Z","cwd":"/workspace/project"}
+{"type":"message","id":"a1","parentId":null,"timestamp":"2026-09-04T00:00:03.000Z","message":{"role":"assistant","provider":"p","model":"m","usage":{"input":1,"output":2,"totalTokens":3}}}
+`)
+	collector := New(Config{SessionDir: root, Now: fixedNow})
+	target := basecollector.Target{
+		Harness:    "pi",
+		SessionRef: &basecollector.SessionRef{Source: "herdr:pi", Agent: "pi", Kind: "path", Value: path},
+		Confidence: usage.ConfidenceExact,
+	}
+
+	snapshot, err := collector.Collect(context.Background(), target)
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if snapshot.SessionID != "session-path" || snapshot.Confidence != usage.ConfidenceExact || snapshot.Tokens.Total != 3 {
+		t.Fatalf("snapshot = %+v", snapshot)
+	}
+}
+
+func TestCollectRejectsSessionPathOutsideRoot(t *testing.T) {
+	root := t.TempDir()
+	outsidePath := writePiSession(t, t.TempDir(), "outside", `
+{"type":"session","version":3,"id":"outside","timestamp":"2026-09-04T00:00:00.000Z","cwd":"/workspace/project"}
+`)
+	collector := New(Config{SessionDir: root, Now: fixedNow})
+	_, err := collector.Collect(context.Background(), basecollector.Target{
+		Harness:    "pi",
+		SessionRef: &basecollector.SessionRef{Source: "herdr:pi", Agent: "pi", Kind: "path", Value: outsidePath},
+		Confidence: usage.ConfidenceExact,
+	})
+	if !errors.Is(err, basecollector.ErrSessionNotFound) {
+		t.Fatalf("error = %v, want session not found", err)
+	}
+}
+
 func TestCollectFallbackByRecentCWD(t *testing.T) {
 	root := t.TempDir()
 	path := writePiSession(t, root, "proj", `
