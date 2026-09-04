@@ -102,6 +102,29 @@ func TestCollectFallbackAmbiguous(t *testing.T) {
 	}
 }
 
+func TestCollectFallbackUsesNewestRecentCWDWhenIdle(t *testing.T) {
+	root := t.TempDir()
+	for index, name := range []string{"old", "new"} {
+		path := writePiSession(t, root, name, `
+{"type":"session","version":3,"id":"session-`+name+`","timestamp":"2026-09-04T00:00:00.000Z","cwd":"/workspace/project"}
+{"type":"message","id":"a1","parentId":null,"timestamp":"2026-09-04T00:00:03.000Z","message":{"role":"assistant","usage":{"input":1,"output":1,"totalTokens":2}}}
+`)
+		mod := fixedNow().Add(time.Duration(index-2) * time.Minute)
+		if err := os.Chtimes(path, mod, mod); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	collector := New(Config{SessionDir: root, AllowCWDRecencyFallback: true, Now: fixedNow})
+	snapshot, err := collector.Collect(context.Background(), basecollector.Target{Harness: "pi", CWD: "/workspace/project", State: "idle", Confidence: usage.ConfidenceEstimated})
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if snapshot.SessionID != "session-new" || snapshot.Confidence != usage.ConfidenceEstimated {
+		t.Fatalf("snapshot = %+v, want newest estimated fallback", snapshot)
+	}
+}
+
 func TestCollectIgnoresPartialTrailingRecord(t *testing.T) {
 	root := t.TempDir()
 	path := writePiSession(t, root, "proj", `

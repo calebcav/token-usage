@@ -12,6 +12,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -222,7 +223,16 @@ func findRecentSessionByCWD(ctx context.Context, root, cwd string, cutoff time.T
 		return "", basecollector.ErrSessionNotFound
 	}
 	if len(candidates) > 1 {
-		return "", basecollector.ErrAmbiguous
+		sort.Slice(candidates, func(i, j int) bool {
+			if !candidates[i].modTime.Equal(candidates[j].modTime) {
+				return candidates[i].modTime.After(candidates[j].modTime)
+			}
+			return candidates[i].path < candidates[j].path
+		})
+		if candidates[0].modTime.Equal(candidates[1].modTime) {
+			return "", basecollector.ErrAmbiguous
+		}
+		return candidates[0].path, nil
 	}
 	return candidates[0].path, nil
 }
