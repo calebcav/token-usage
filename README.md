@@ -30,12 +30,23 @@ Continue with the Herdr configuration below. You can open the dashboard without 
 ## Install from a local checkout
 
 ```sh
-go build -trimpath -ldflags "-s -w -X main.version=0.1.0" -o bin/token-usage ./cmd/token-usage
+make build
 herdr plugin link .
 ./bin/token-usage setup
 ```
 
-`plugin link` deliberately does not run manifest build commands, so build the binary first. GitHub installation runs the declared Go build automatically.
+`plugin link` deliberately does not run manifest build commands, so build the binary first. `make build` derives the version from the nearest Git tag. GitHub installation runs the declared Go build automatically.
+
+## Versioning and releases
+
+Releases follow [Semantic Versioning](https://semver.org/) and are derived from [Conventional Commits](https://www.conventionalcommits.org/):
+
+- `fix:` creates a patch release.
+- `feat:` creates a minor release.
+- A `!` after the type/scope (for example, `feat!:`) or a `BREAKING CHANGE:` footer creates a major release.
+- Commits such as `docs:` and `chore:` typically do not trigger a release.
+
+On changes to `main`, Release Please maintains a release PR that updates the changelog and version in `herdr-plugin.toml`. Merging that PR creates the Git tag and GitHub release; GoReleaser then attaches the platform archives and checksums.
 
 ## Configure Herdr
 
