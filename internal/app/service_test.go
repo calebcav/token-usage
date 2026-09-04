@@ -13,11 +13,12 @@ import (
 )
 
 type fakeHerdr struct {
-	snapshot herdr.Snapshot
-	reports  map[string]herdr.Metadata
-	process  map[string]herdr.ProcessInfo
-	focused  string
-	mu       sync.Mutex
+	snapshot    herdr.Snapshot
+	reports     map[string]herdr.Metadata
+	reportCalls int
+	process     map[string]herdr.ProcessInfo
+	focused     string
+	mu          sync.Mutex
 }
 
 func (client *fakeHerdr) ProcessInfo(_ context.Context, paneID string) (herdr.ProcessInfo, error) {
@@ -43,6 +44,7 @@ func (client *fakeHerdr) ReportMetadata(_ context.Context, paneID string, metada
 	if client.reports == nil {
 		client.reports = make(map[string]herdr.Metadata)
 	}
+	client.reportCalls++
 	client.reports[paneID] = metadata
 	return nil
 }
@@ -89,6 +91,36 @@ func (fakeCollector) Collect(_ context.Context, target collector.Target) (usage.
 		Confidence:  target.Confidence,
 		CollectedAt: time.Unix(100, 0),
 	}, nil
+}
+
+type countingCollector struct {
+	calls int
+	now   time.Time
+	mu    sync.Mutex
+}
+
+func (*countingCollector) Harnesses() []string { return []string{"codex"} }
+
+func (item *countingCollector) Collect(_ context.Context, target collector.Target) (usage.Snapshot, error) {
+	item.mu.Lock()
+	item.calls++
+	item.mu.Unlock()
+	tokens, _ := usage.NewTokens(10, 0, 0, 2, 0)
+	return usage.Snapshot{
+		SchemaVersion: usage.SchemaVersion,
+		Harness:       "codex",
+		SessionID:     target.SessionID,
+		Tokens:        tokens,
+		Source:        "counting-fixture",
+		Confidence:    target.Confidence,
+		CollectedAt:   item.now,
+	}, nil
+}
+
+func (item *countingCollector) callCount() int {
+	item.mu.Lock()
+	defer item.mu.Unlock()
+	return item.calls
 }
 
 type detectingCollector struct{}
@@ -153,6 +185,60 @@ func TestCollectPublishesSuccessAndClearsFailures(t *testing.T) {
 	}
 	if value := client.report("w1:p2").Tokens["limit"]; value != nil {
 		t.Fatalf("failed collector should clear limit, got %v", *value)
+	}
+}
+
+func TestCollectUsesFreshSnapshotCacheAndForceBypassesIt(t *testing.T) {
+	now := time.Date(2026, 9, 4, 3, 0, 0, 0, time.UTC)
+	item := &countingCollector{now: now}
+	registry, err := collector.NewRegistry(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &fakeHerdr{snapshot: herdr.Snapshot{Version: "0.8.2", Agents: []herdr.Record{{
+		PaneID:      "w1:p1",
+		WorkspaceID: "w1",
+		Agent:       "codex",
+		AgentStatus: "idle",
+		AgentSession: &herdr.SessionRef{
+			Agent: "codex",
+			Value: "session-1",
+		},
+	}}}}
+	service := &Service{
+		Registry: registry,
+		Herdr:    client,
+		Cache:    &FileSnapshotCache{Directory: t.TempDir(), Now: func() time.Time { return now }},
+	}
+	options := CollectOptions{Publish: true, IncludeWorking: true, CacheTTL: time.Minute}
+
+	first, err := service.Collect(context.Background(), options)
+	if err != nil || len(first) != 1 || first[0].Snapshot == nil || first[0].FromCache {
+		t.Fatalf("first Collect() = %+v, %v", first, err)
+	}
+	if item.callCount() != 1 || client.reportCalls != 1 {
+		t.Fatalf("first calls = collector %d, reports %d; want 1, 1", item.callCount(), client.reportCalls)
+	}
+
+	client.snapshot.Agents[0].AgentStatus = "working"
+	second, err := service.Collect(context.Background(), options)
+	if err != nil || len(second) != 1 || second[0].Snapshot == nil || !second[0].FromCache {
+		t.Fatalf("cached Collect() = %+v, %v", second, err)
+	}
+	if second[0].Snapshot.State != "working" {
+		t.Fatalf("cached state = %q, want working", second[0].Snapshot.State)
+	}
+	if item.callCount() != 1 || client.reportCalls != 1 {
+		t.Fatalf("cached calls = collector %d, reports %d; want 1, 1", item.callCount(), client.reportCalls)
+	}
+
+	options.CacheTTL = 0
+	third, err := service.Collect(context.Background(), options)
+	if err != nil || len(third) != 1 || third[0].Snapshot == nil || third[0].FromCache {
+		t.Fatalf("forced Collect() = %+v, %v", third, err)
+	}
+	if item.callCount() != 2 || client.reportCalls != 2 {
+		t.Fatalf("forced calls = collector %d, reports %d; want 2, 2", item.callCount(), client.reportCalls)
 	}
 }
 

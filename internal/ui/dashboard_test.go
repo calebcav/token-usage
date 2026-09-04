@@ -39,6 +39,16 @@ func TestViewRendersUsageAndInclusiveReasoning(t *testing.T) {
 	}
 }
 
+func TestSubtitleMarksCachedSnapshots(t *testing.T) {
+	m := model{
+		lastRefresh: time.Date(2026, 9, 4, 3, 0, 0, 0, time.UTC),
+		results:     []app.Result{{FromCache: true}},
+	}
+	if subtitle := m.subtitle(); !strings.Contains(subtitle, "cached ≤15s") {
+		t.Fatalf("subtitle = %q, want cache TTL marker", subtitle)
+	}
+}
+
 func TestContextBarSegmentsClampToAvailableWidth(t *testing.T) {
 	tests := []struct {
 		name         string
