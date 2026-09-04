@@ -25,6 +25,10 @@ type processInfoClient interface {
 	ProcessInfo(context.Context, string) (herdr.ProcessInfo, error)
 }
 
+type agentFocusClient interface {
+	FocusAgent(context.Context, string) error
+}
+
 type Service struct {
 	Registry       *collector.Registry
 	Herdr          HerdrClient
@@ -36,6 +40,17 @@ type CollectOptions struct {
 	PaneID         string
 	Publish        bool
 	IncludeWorking bool
+}
+
+func (s *Service) FocusPane(ctx context.Context, paneID string) error {
+	if s == nil || s.Herdr == nil {
+		return errors.New("herdr client is not configured")
+	}
+	client, ok := s.Herdr.(agentFocusClient)
+	if !ok {
+		return errors.New("herdr client does not support focusing agents")
+	}
+	return client.FocusAgent(ctx, paneID)
 }
 
 type Result struct {

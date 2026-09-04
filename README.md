@@ -1,16 +1,16 @@
 # Token Usage for Herdr
 
-Token Usage gives every active coding-agent pane consistent session usage, context occupancy, best-effort account limits, and a fast popup dashboard. It ships adapters for Codex, Claude Code, and OpenCode, plus a small JSON subprocess contract for other harnesses.
+Token Usage gives every active coding-agent pane consistent session usage, context occupancy, best-effort account limits, and a fast popup dashboard. It ships adapters for Codex, Claude Code, OpenCode, and Pi, plus a small JSON subprocess contract for other harnesses.
 
 It does not estimate prices or build usage history. Token collection stays in harness-owned local stores; optional enrichments use the installed harness CLIs and never parse credentials directly.
 
 ## What you get
 
 - Compact Herdr sidebar tokens: `$usage`, `$context`, `$limit`, `$model`, `$harness`, and `$confidence`.
-- A responsive Bubble Tea popup with per-session context bars, account-limit windows, normalized token breakdowns, keyboard navigation, and five-second refreshes.
+- A responsive Bubble Tea popup with per-session context bars, account-limit windows, normalized token breakdowns, keyboard navigation, Enter-to-focus, and five-second refreshes.
 - Exact Herdr-native session matching when available, with cautious and visibly `estimated` cwd fallback.
 - Privacy-filtered collectors that never persist prompts, completions, tool calls, transcript paths, or credentials.
-- A versioned external collector contract for Aider, Pi, custom wrappers, and future harnesses.
+- A versioned external collector contract for Aider, custom wrappers, and future harnesses.
 
 ## Requirements
 
@@ -111,7 +111,7 @@ token-usage contract        Print the external adapter contract
 
 Herdr automatically republishes metadata after startup, when an agent is detected, when a pane is focused, and when an agent settles. Working-state events are skipped; the dashboard can still refresh a working session on demand.
 
-Context bars use the harness's reported live context occupancy, not cumulative token totals. Codex reads rollout context, Claude uses fresh status-line state, and OpenCode combines its latest completed assistant-message counters with a runtime-resolved model limit. OpenCode invokes `opencode models --pure --verbose`, which disables external plugins, and caches successful limits for ten minutes. When a harness does not expose a trustworthy context window, the dashboard says `not reported` instead of inventing a percentage. Bars remain readable without color and change from green to amber at 70%, then red at 90%.
+Context bars use the harness's reported live context occupancy, not cumulative token totals. Codex reads rollout context, Claude uses fresh status-line state, OpenCode combines its latest completed assistant-message counters with a runtime-resolved model limit, and Pi combines its latest valid assistant usage with the installed Pi model catalog. OpenCode invokes `opencode models --pure --verbose`, which disables external plugins, and caches successful limits for ten minutes. Pi queries its catalog offline and caches model limits for the plugin process lifetime. When a harness does not expose a trustworthy context window, the dashboard says `not reported` instead of inventing a percentage. Bars remain readable without color and change from green to amber at 70%, then red at 90%.
 
 Account limits are best effort and remain distinct from session tokens and context occupancy. Codex queries the authenticated local app server and caches results for at most one minute; this may let Codex refresh account state from its provider. Claude exposes 5-hour, 7-day, and spend windows through the status-line payload. OpenCode has no provider-neutral account-quota interface, so its account limit is shown as `not reported`. `$limit` displays the most-used reported window, while the dashboard shows every available window and reset time.
 
@@ -130,6 +130,7 @@ The human-facing `SPENT` and sidebar `Σ` values report fresh input + output. Ca
 | Codex | `CODEX_HOME/sessions` rollout JSONL, optional authenticated app server | Uses the final complete cumulative token event; cumulative events are never summed. |
 | Claude Code | `CLAUDE_CONFIG_DIR/projects` transcript JSONL, optional status-line state | Sums unique assistant messages, deduplicating repeated message IDs and all cache-creation components; repeated refreshes parse only newly appended complete records. |
 | OpenCode | Local `opencode.db` SQLite store, pure model metadata command | Adds OpenCode's raw input, cache, output, and reasoning counters; the database is opened read-only. |
+| Pi | `~/.pi/agent/sessions` JSONL sessions | Sums usage on the active session branch, including assistant/tool-result usage and compaction/branch-summary generation usage. |
 
 An exact native session ID always wins. If Herdr has no native session reference, fallback only succeeds when a recent cwd match is unambiguous, and the result is labeled `estimated`. The plugin would rather show “unavailable” than attach another agent's tokens to the wrong pane.
 

@@ -144,6 +144,18 @@ func TestOpenDashboard(t *testing.T) {
 	}
 }
 
+func TestFocusAgent(t *testing.T) {
+	runner := &fakeRunner{}
+	client := &Client{Binary: "herdr-test", Runner: runner}
+	if err := client.FocusAgent(context.Background(), "w1:p2"); err != nil {
+		t.Fatalf("FocusAgent() error = %v", err)
+	}
+	want := []string{"agent", "focus", "w1:p2"}
+	if runner.name != "herdr-test" || !reflect.DeepEqual(runner.args, want) {
+		t.Fatalf("command = %q %#v, want %q %#v", runner.name, runner.args, "herdr-test", want)
+	}
+}
+
 func TestPluginConfigDir(t *testing.T) {
 	runner := &fakeRunner{stdout: []byte("/tmp/herdr/token-usage\n")}
 	client := &Client{Runner: runner}

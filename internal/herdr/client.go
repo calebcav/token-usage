@@ -347,6 +347,18 @@ func (c *Client) OpenDashboard(ctx context.Context) error {
 	return nil
 }
 
+func (c *Client) FocusAgent(ctx context.Context, target string) error {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return errors.New("pane id is required")
+	}
+	_, stderr, err := c.run(ctx, "agent", "focus", target)
+	if err != nil {
+		return commandError("focus coding-agent pane", stderr, err)
+	}
+	return nil
+}
+
 func (c *Client) PluginConfigDir(ctx context.Context, pluginID string) (string, error) {
 	pluginID = strings.TrimSpace(pluginID)
 	if pluginID == "" {

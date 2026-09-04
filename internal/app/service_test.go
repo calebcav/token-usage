@@ -16,6 +16,7 @@ type fakeHerdr struct {
 	snapshot herdr.Snapshot
 	reports  map[string]herdr.Metadata
 	process  map[string]herdr.ProcessInfo
+	focused  string
 	mu       sync.Mutex
 }
 
@@ -25,6 +26,11 @@ func (client *fakeHerdr) ProcessInfo(_ context.Context, paneID string) (herdr.Pr
 		return herdr.ProcessInfo{}, errors.New("process info unavailable")
 	}
 	return info, nil
+}
+
+func (client *fakeHerdr) FocusAgent(_ context.Context, paneID string) error {
+	client.focused = paneID
+	return nil
 }
 
 func (client *fakeHerdr) Snapshot(context.Context) (herdr.Snapshot, error) {
@@ -45,6 +51,17 @@ func (client *fakeHerdr) report(paneID string) herdr.Metadata {
 	client.mu.Lock()
 	defer client.mu.Unlock()
 	return client.reports[paneID]
+}
+
+func TestFocusPane(t *testing.T) {
+	client := &fakeHerdr{}
+	service := &Service{Herdr: client}
+	if err := service.FocusPane(context.Background(), "w1:p2"); err != nil {
+		t.Fatalf("FocusPane() error = %v", err)
+	}
+	if client.focused != "w1:p2" {
+		t.Fatalf("focused = %q, want w1:p2", client.focused)
+	}
 }
 
 type fakeCollector struct{}
