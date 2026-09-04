@@ -30,7 +30,9 @@ type model struct {
 	height      int
 	selected    int
 	loading     bool
+	navigating  bool
 	err         error
+	navigateErr error
 	lastRefresh time.Time
 }
 
@@ -41,6 +43,10 @@ type refreshMsg struct {
 }
 
 type tickMsg time.Time
+
+type navigateMsg struct {
+	err error
+}
 
 type contextSeverity uint8
 
@@ -67,6 +73,15 @@ func (m model) refresh() tea.Cmd {
 	}
 }
 
+func (m model) navigate() tea.Cmd {
+	paneID := m.results[m.selected].Target.PaneID
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(m.ctx, 5*time.Second)
+		defer cancel()
+		return navigateMsg{err: m.service.FocusPane(ctx, paneID)}
+	}
+}
+
 func tick() tea.Cmd {
 	return tea.Tick(refreshInterval, func(value time.Time) tea.Msg { return tickMsg(value) })
 }
@@ -78,9 +93,15 @@ func (m model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "esc", "ctrl+c":
 			return m, tea.Quit
 		case "r":
-			if !m.loading {
+			if !m.loading && !m.navigating {
 				m.loading = true
 				return m, m.refresh()
+			}
+		case "enter":
+			if !m.navigating && m.selected >= 0 && m.selected < len(m.results) {
+				m.navigating = true
+				m.navigateErr = nil
+				return m, m.navigate()
 			}
 		case "up", "k":
 			if m.selected > 0 {
@@ -101,6 +122,12 @@ func (m model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastRefresh = msg.at
 		if m.selected >= len(m.results) {
 			m.selected = max(0, len(m.results)-1)
+		}
+	case navigateMsg:
+		m.navigating = false
+		m.navigateErr = msg.err
+		if msg.err == nil {
+			return m, tea.Quit
 		}
 	case tickMsg:
 		commands := []tea.Cmd{tick()}
@@ -166,6 +193,11 @@ func (m model) View() tea.View {
 		body.WriteString(m.renderDetail(contentWidth))
 	}
 
+	if m.navigateErr != nil {
+		body.WriteString("\n")
+		message := "Could not open session: " + usage.SanitizeText(m.navigateErr.Error(), 512)
+		body.WriteString(bad.Render(wrapWords(message, contentWidth)))
+	}
 	body.WriteString("\n")
 	body.WriteString(m.renderFooter(contentWidth))
 
@@ -228,7 +260,9 @@ func (m model) renderHeader(width int) string {
 
 func (m model) renderFooter(width int) string {
 	footer := footerForWidth(width)
-	if m.loading {
+	if m.navigating {
+		footer = "opening session…"
+	} else if m.loading {
 		footer = "refreshing…  •  " + footer
 	}
 	return muted.Render(wrapWords(footer, width))
@@ -246,12 +280,12 @@ func (m model) subtitleForWidth(width int) string {
 
 func footerForWidth(width int) string {
 	if width < 28 {
-		return "r refresh  •  q close"
+		return "enter open  •  q close"
 	}
-	if width < 42 {
-		return "↑/↓  •  r refresh  •  q close"
+	if width < 52 {
+		return "↑/↓  •  enter open  •  q close"
 	}
-	return "↑/↓ select  •  r refresh  •  q close"
+	return "↑/↓ select  •  enter open  •  r refresh  •  q close"
 }
 
 func renderTotals(results []app.Result, width int) string {

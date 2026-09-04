@@ -18,7 +18,7 @@ Herdr session snapshot
 
 - `internal/herdr` is the only Herdr CLI boundary. It accepts wrapped or bare session snapshots, derives collection targets, opens the popup, and publishes metadata patches.
 - `internal/collector` defines the target interface and harness registry.
-- `internal/collector/{codex,claude,opencode}` contains source-specific resolution and normalization.
+- `internal/collector/{codex,claude,opencode,pi}` contains source-specific resolution and normalization.
 - `internal/collector/external` implements the versioned local subprocess contract.
 - `internal/usage` owns the normalized snapshot and its arithmetic invariants.
 - `internal/app` coordinates bounded parallel collection, metadata publication, and session deduplication.
@@ -53,7 +53,7 @@ The dashboard performs its own five-second refresh and includes working sessions
 
 Claude transcript state is cached in memory by path and byte offset. After a clean read, later refreshes parse only appended records; truncation or replacement falls back to a complete parse, and an unterminated final record is never committed to the cache.
 
-Claude status-line state is privacy-filtered before it reaches disk. The generated configuration invokes the bridge on Claude's event-driven updates and every 60 seconds. A new session can initially provide only its identity; context and account windows remain absent until Claude receives its first API response. Once reported, context remains valid while the transcript is unchanged, and account percentages expire after five minutes or their window reset. Codex app-server quota state is keyed by `CODEX_HOME` and executable, expires after one minute or an earlier window reset, and is always best effort. OpenCode resolves model context with external plugins disabled, uses the session's authoritative directory, and caches only successful limits for ten minutes.
+Claude status-line state is privacy-filtered before it reaches disk. The generated configuration invokes the bridge on Claude's event-driven updates and every 60 seconds. A new session can initially provide only its identity; context and account windows remain absent until Claude receives its first API response. Once reported, context remains valid while the transcript is unchanged, and account percentages expire after five minutes or their window reset. Codex app-server quota state is keyed by `CODEX_HOME` and executable, expires after one minute or an earlier window reset, and is always best effort. OpenCode resolves model context with external plugins disabled, uses the session's authoritative directory, and caches only successful limits for ten minutes. Pi reads only JSONL session metadata and usage counters from the active branch, then resolves the selected model's context limit from Pi's offline model catalog.
 
 Version 0.1 aggregates direct/root-session records. Claude subagent transcript directories, Codex child rollouts, and OpenCode child-session rows remain separate and are not added to their parent's total.
 

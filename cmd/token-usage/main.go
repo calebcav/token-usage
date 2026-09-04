@@ -21,6 +21,7 @@ import (
 	"github.com/calebcav/token-usage/internal/collector/codex"
 	"github.com/calebcav/token-usage/internal/collector/external"
 	"github.com/calebcav/token-usage/internal/collector/opencode"
+	"github.com/calebcav/token-usage/internal/collector/pi"
 	"github.com/calebcav/token-usage/internal/herdr"
 	"github.com/calebcav/token-usage/internal/sequence"
 	"github.com/calebcav/token-usage/internal/ui"
@@ -101,6 +102,7 @@ func newService(ctx context.Context) (*app.Service, error) {
 		codex.New(codex.Config{AllowCWDRecencyFallback: true, EnableAccountLimits: true}),
 		claude.New(),
 		opencode.New(opencode.Config{AllowDirectoryFallback: true}),
+		pi.New(pi.Config{AllowCWDRecencyFallback: true}),
 	}
 
 	configPath := resolveExternalConfigPath(ctx)

@@ -2,7 +2,7 @@ id = "token-usage"
 name = "Token Usage"
 version = "0.1.0"
 min_herdr_version = "0.8.2"
-description = "Local token usage for Codex, Claude Code, OpenCode, and custom coding harnesses."
+description = "Local token usage for Codex, Claude Code, OpenCode, Pi, and custom coding harnesses."
 platforms = ["linux", "macos"]
 
 [[build]]
