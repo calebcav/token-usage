@@ -3,6 +3,7 @@ package herdr
 import (
 	"context"
 	"errors"
+	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -83,6 +84,54 @@ func TestSnapshotAcceptsBarePayloadAndPaneFallback(t *testing.T) {
 	}
 	if snapshot.Protocol != 2 {
 		t.Fatalf("protocol = %d, want 2", snapshot.Protocol)
+	}
+}
+
+func TestFocusedPiTargetUsesLocalSessionEnvironment(t *testing.T) {
+	cwd := t.TempDir()
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(cwd); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(oldwd); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	}()
+	t.Setenv("PI_CODING_AGENT", "true")
+	t.Setenv("PI_SESSION_ID", "local-session")
+
+	snapshot := Snapshot{
+		Protocol:      20,
+		FocusedPaneID: "w1:p1",
+		Agents: []Record{{
+			PaneID:      "w1:p1",
+			WorkspaceID: "w1",
+			Agent:       "pi",
+			CWD:         cwd,
+			Focused:     true,
+		}},
+	}
+
+	targets := snapshot.Targets()
+	if len(targets) != 1 {
+		t.Fatalf("Targets() len = %d, want 1", len(targets))
+	}
+	if targets[0].SessionID != "local-session" || targets[0].Confidence != usage.ConfidenceExact {
+		t.Fatalf("target = %+v, want local exact session", targets[0])
+	}
+	if targets[0].SessionRef == nil || targets[0].SessionRef.Source != "env:pi" || targets[0].SessionRef.Value != "local-session" {
+		t.Fatalf("session ref = %+v", targets[0].SessionRef)
+	}
+
+	snapshot.FocusedPaneID = "w2:p1"
+	snapshot.Agents[0].Focused = false
+	targets = snapshot.Targets()
+	if targets[0].SessionID != "" || targets[0].Confidence != usage.ConfidenceEstimated {
+		t.Fatalf("unfocused target = %+v, want estimated fallback", targets[0])
 	}
 }
 

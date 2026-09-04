@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -186,6 +187,15 @@ func (s Snapshot) Targets() []collector.Target {
 				Value:  strings.TrimSpace(record.AgentSession.Value),
 			}
 			target.Confidence = usage.ConfidenceExact
+		} else if ref := localPiSessionRef(harness, record, s.FocusedPaneID, target.CWD); ref != nil {
+			target.SessionID = ref.Value
+			target.SessionRef = &collector.SessionRef{
+				Source: ref.Source,
+				Agent:  ref.Agent,
+				Kind:   ref.Kind,
+				Value:  ref.Value,
+			}
+			target.Confidence = usage.ConfidenceExact
 		}
 		byPane[target.PaneID] = target
 	}
@@ -213,10 +223,40 @@ func mergeRecord(primary, fallback Record) Record {
 	primary.AgentStatus = firstNonEmpty(primary.AgentStatus, fallback.AgentStatus)
 	primary.CWD = firstNonEmpty(primary.CWD, fallback.CWD)
 	primary.ForegroundCWD = firstNonEmpty(primary.ForegroundCWD, fallback.ForegroundCWD)
+	primary.Focused = primary.Focused || fallback.Focused
 	if primary.AgentSession == nil {
 		primary.AgentSession = fallback.AgentSession
 	}
 	return primary
+}
+
+func localPiSessionRef(harness string, record Record, focusedPaneID, targetCWD string) *SessionRef {
+	if harness != "pi" || (!record.Focused && strings.TrimSpace(record.PaneID) != strings.TrimSpace(focusedPaneID)) {
+		return nil
+	}
+	if strings.TrimSpace(os.Getenv("PI_CODING_AGENT")) == "" {
+		return nil
+	}
+	sessionID := strings.TrimSpace(os.Getenv("PI_SESSION_ID"))
+	if sessionID == "" {
+		return nil
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = strings.TrimSpace(os.Getenv("PWD"))
+	}
+	if strings.TrimSpace(targetCWD) == "" || cwd == "" || cleanCWD(targetCWD) != cleanCWD(cwd) {
+		return nil
+	}
+	return &SessionRef{Source: "env:pi", Agent: "pi", Kind: "id", Value: sessionID}
+}
+
+func cleanCWD(value string) string {
+	cleaned := filepath.Clean(strings.TrimSpace(value))
+	if resolved, err := filepath.EvalSymlinks(cleaned); err == nil {
+		return filepath.Clean(resolved)
+	}
+	return cleaned
 }
 
 func firstNonEmpty(values ...string) string {
