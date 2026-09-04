@@ -17,6 +17,7 @@ import (
 
 const (
 	refreshInterval    = 5 * time.Second
+	dashboardCacheTTL  = 15 * time.Second
 	wideLayoutMinWidth = 100
 	miniBarWidth       = 14
 	compactLimitWidth  = 12
@@ -63,12 +64,20 @@ func Run(ctx context.Context, service *app.Service) error {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(m.refresh(), tick())
+	return tea.Batch(m.refresh(false), tick())
 }
 
-func (m model) refresh() tea.Cmd {
+func (m model) refresh(force bool) tea.Cmd {
 	return func() tea.Msg {
-		results, err := m.service.Collect(m.ctx, app.CollectOptions{Publish: true, IncludeWorking: true})
+		cacheTTL := dashboardCacheTTL
+		if force {
+			cacheTTL = 0
+		}
+		results, err := m.service.Collect(m.ctx, app.CollectOptions{
+			Publish:        true,
+			IncludeWorking: true,
+			CacheTTL:       cacheTTL,
+		})
 		return refreshMsg{results: app.UniqueSessions(results), err: err, at: time.Now()}
 	}
 }
@@ -95,7 +104,7 @@ func (m model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		case "r":
 			if !m.loading && !m.navigating {
 				m.loading = true
-				return m, m.refresh()
+				return m, m.refresh(true)
 			}
 		case "enter":
 			if !m.navigating && m.selected >= 0 && m.selected < len(m.results) {
@@ -133,7 +142,7 @@ func (m model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		commands := []tea.Cmd{tick()}
 		if !m.loading {
 			m.loading = true
-			commands = append(commands, m.refresh())
+			commands = append(commands, m.refresh(false))
 		}
 		return m, tea.Batch(commands...)
 	}
@@ -246,7 +255,19 @@ func (m model) subtitle() string {
 	if !m.lastRefresh.IsZero() {
 		parts = append(parts, "updated "+m.lastRefresh.Format("15:04:05"))
 	}
+	if resultsFromCache(m.results) {
+		parts = append(parts, "cached ≤"+dashboardCacheTTL.String())
+	}
 	return strings.Join(parts, "  •  ")
+}
+
+func resultsFromCache(results []app.Result) bool {
+	for _, result := range results {
+		if result.FromCache {
+			return true
+		}
+	}
+	return false
 }
 
 func (m model) renderHeader(width int) string {

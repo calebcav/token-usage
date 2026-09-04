@@ -123,6 +123,9 @@ func newService(ctx context.Context) (*app.Service, error) {
 		return nil, err
 	}
 	service := &app.Service{Registry: registry, Herdr: herdr.NewClient()}
+	if cacheDir := resolveSnapshotCacheDir(); cacheDir != "" {
+		service.Cache = &app.FileSnapshotCache{Directory: cacheDir}
+	}
 	if stateDir := strings.TrimSpace(os.Getenv("HERDR_PLUGIN_STATE_DIR")); stateDir != "" {
 		counter := sequence.Counter{Path: filepath.Join(stateDir, "metadata-seq")}
 		service.NextSequence = func() uint64 {
@@ -134,6 +137,17 @@ func newService(ctx context.Context) (*app.Service, error) {
 		}
 	}
 	return service, nil
+}
+
+func resolveSnapshotCacheDir() string {
+	if stateDir := strings.TrimSpace(os.Getenv("HERDR_PLUGIN_STATE_DIR")); stateDir != "" {
+		return filepath.Join(stateDir, "snapshot-cache")
+	}
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(cacheDir, "token-usage", "snapshot-cache")
 }
 
 func runEvent(ctx context.Context, stderr io.Writer) error {

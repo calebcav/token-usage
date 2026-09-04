@@ -7,7 +7,7 @@ It does not estimate prices or build usage history. Token collection stays in ha
 ## What you get
 
 - Compact Herdr sidebar tokens: `$usage`, `$context`, `$limit`, `$model`, `$harness`, and `$confidence`.
-- A responsive Bubble Tea popup with per-session context bars, account-limit windows, normalized token breakdowns, keyboard navigation, Enter-to-focus, and five-second refreshes.
+- A responsive Bubble Tea popup with per-session context bars, account-limit windows, normalized token breakdowns, keyboard navigation, Enter-to-focus, and five-second freshness checks backed by a short-lived local cache.
 - Exact Herdr-native session matching when available, with cautious and visibly `estimated` cwd fallback.
 - Privacy-filtered collectors that never persist prompts, completions, tool calls, transcript paths, or credentials.
 - A versioned external collector contract for Aider, custom wrappers, and future harnesses.
@@ -122,6 +122,8 @@ token-usage contract        Print the external adapter contract
 
 Herdr automatically republishes metadata after startup, when an agent is detected, when a pane is focused, and when an agent settles. Working-state events are skipped; the dashboard can still refresh a working session on demand.
 
+The dashboard reuses normalized per-pane snapshots for up to 15 seconds, while still checking Herdr every five seconds for active pane and state changes. Event, startup, `status`, and explicit refresh collections bypass cache reads and warm the cache for the next dashboard open. Pressing `r` in the dashboard also forces a source refresh. Cache entries are stored as user-only files and contain no cwd or harness source content.
+
 Context bars use the harness's reported live context occupancy, not cumulative token totals. Codex reads rollout context, Claude uses fresh status-line state, OpenCode combines its latest completed assistant-message counters with a runtime-resolved model limit, and Pi combines its latest valid assistant usage with the installed Pi model catalog. OpenCode invokes `opencode models --pure --verbose`, which disables external plugins, and caches successful limits for ten minutes. Pi queries its catalog offline and caches model limits for the plugin process lifetime. When a harness does not expose a trustworthy context window, the dashboard says `not reported` instead of inventing a percentage. Bars remain readable without color and change from green to amber at 70%, then red at 90%.
 
 Account limits are best effort and remain distinct from session tokens and context occupancy. Codex queries the authenticated local app server and caches results for at most one minute; this may let Codex refresh account state from its provider. Claude exposes 5-hour, 7-day, and spend windows through the status-line payload. OpenCode has no provider-neutral account-quota interface, so its account limit is shown as `not reported`. `$limit` displays the most-used reported window, while the dashboard shows every available window and reset time.
@@ -165,7 +167,7 @@ Create `collectors.json` in the directory printed by `token-usage setup`:
 
 ## Privacy and safety
 
-Token sources and normalized caches stay on the machine. Collectors decode only identifiers, cwd metadata, model/provider labels, timestamps, and numeric usage fields. User prompts, assistant text, and tool payloads are ignored. Errors and snapshots expose a safe source kind such as `codex-rollout`, never a transcript or database path. Codex account enrichment starts an authenticated `codex app-server` process and may perform Codex's normal account-state network request; Token Usage neither reads nor stores the credential.
+Token sources and normalized caches stay on the machine. Dashboard snapshot-cache files contain only normalized snapshots and hashed target keys; they do not contain plaintext cwd values, transcript paths, prompts, or responses. Collectors decode only identifiers, cwd metadata, model/provider labels, timestamps, and numeric usage fields. User prompts, assistant text, and tool payloads are ignored. Errors and snapshots expose a safe source kind such as `codex-rollout`, never a transcript or database path. Codex account enrichment starts an authenticated `codex app-server` process and may perform Codex's normal account-state network request; Token Usage neither reads nor stores the credential.
 
 External collectors are ordinary local programs configured by you. They receive pane/session metadata including cwd, so only configure commands you trust. Output is capped at 1 MiB and each command has a five-second timeout.
 

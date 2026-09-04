@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/calebcav/token-usage/internal/collector"
 	"github.com/calebcav/token-usage/internal/herdr"
@@ -32,6 +33,7 @@ type agentFocusClient interface {
 type Service struct {
 	Registry       *collector.Registry
 	Herdr          HerdrClient
+	Cache          SnapshotCache
 	MaxParallelism int
 	NextSequence   func() uint64
 }
@@ -40,6 +42,10 @@ type CollectOptions struct {
 	PaneID         string
 	Publish        bool
 	IncludeWorking bool
+	// CacheTTL opts into normalized snapshot cache reads. A zero value always
+	// collects from the harness source, but successful results still warm the
+	// cache for later dashboard requests.
+	CacheTTL time.Duration
 }
 
 func (s *Service) FocusPane(ctx context.Context, paneID string) error {
@@ -58,6 +64,7 @@ type Result struct {
 	Snapshot   *usage.Snapshot  `json:"snapshot,omitempty"`
 	Error      string           `json:"error,omitempty"`
 	PublishErr string           `json:"publish_error,omitempty"`
+	FromCache  bool             `json:"from_cache,omitempty"`
 }
 
 func (r Result) Err() error {
@@ -105,9 +112,16 @@ func (s *Service) Collect(ctx context.Context, options CollectOptions) ([]Result
 	}
 
 	jobs := make(chan int)
-	sequenceNumber := sequence.MemoryNext()
-	if s.NextSequence != nil {
-		sequenceNumber = s.NextSequence()
+	var sequenceOnce sync.Once
+	var sequenceNumber uint64
+	nextSequence := func() uint64 {
+		sequenceOnce.Do(func() {
+			sequenceNumber = sequence.MemoryNext()
+			if s.NextSequence != nil {
+				sequenceNumber = s.NextSequence()
+			}
+		})
+		return sequenceNumber
 	}
 	var workers sync.WaitGroup
 	workers.Add(parallelism)
@@ -115,7 +129,7 @@ func (s *Service) Collect(ctx context.Context, options CollectOptions) ([]Result
 		go func() {
 			defer workers.Done()
 			for index := range jobs {
-				results[index] = s.collectOne(ctx, targets[index], options.Publish, sequenceNumber)
+				results[index] = s.collectOne(ctx, targets[index], options, nextSequence)
 			}
 		}()
 	}
@@ -209,41 +223,73 @@ func filterTargets(targets []collector.Target, options CollectOptions) []collect
 	return filtered
 }
 
-func (s *Service) collectOne(ctx context.Context, target collector.Target, publish bool, sequence uint64) Result {
+func (s *Service) collectOne(ctx context.Context, target collector.Target, options CollectOptions, nextSequence func() uint64) Result {
 	result := Result{Target: target}
+	if options.CacheTTL > 0 && s.Cache != nil {
+		if snapshot, ok := s.Cache.Load(target, options.CacheTTL); ok {
+			enrichSnapshot(&snapshot, target)
+			// Never upgrade an estimated live association with confidence from an
+			// older exact target. A fresh collection will restore exactness once
+			// Herdr supplies the authoritative session reference again.
+			if target.Confidence == usage.ConfidenceEstimated {
+				snapshot.Confidence = usage.ConfidenceEstimated
+			}
+			if snapshot.Validate() == nil {
+				result.Snapshot = &snapshot
+				result.FromCache = true
+				// The fresh collection that populated this entry already handled
+				// publication when requested. Avoid spawning another Herdr process
+				// for an unchanged cached value.
+				return result
+			}
+		}
+	}
+
 	item, err := s.Registry.CollectorFor(target.Harness)
 	if err == nil {
 		var snapshot usage.Snapshot
 		snapshot, err = item.Collect(ctx, target)
 		if err == nil {
-			snapshot.PaneID = target.PaneID
-			snapshot.WorkspaceID = target.WorkspaceID
-			snapshot.State = target.State
-			if snapshot.Harness == "" {
-				snapshot.Harness = target.Harness
-			}
-			if snapshot.Confidence == "" {
-				snapshot.Confidence = target.Confidence
-			}
+			enrichSnapshot(&snapshot, target)
 			if validationErr := snapshot.Validate(); validationErr != nil {
 				err = fmt.Errorf("invalid %s usage snapshot: %w", target.Harness, validationErr)
 			} else {
 				result.Snapshot = &snapshot
+				if s.Cache != nil {
+					// The cache is an optimization; an unwritable cache must not make
+					// otherwise-valid local usage unavailable.
+					_ = s.Cache.Store(target, snapshot)
+				}
 			}
 		}
 	}
 	if err != nil {
 		result.Error = usage.SanitizeText(err.Error(), 512)
+		if s.Cache != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			_ = s.Cache.Delete(target)
+		}
 	}
 
-	if publish {
+	if options.Publish {
 		metadata := metadataFor(result.Snapshot)
-		metadata.Seq = sequence
+		metadata.Seq = nextSequence()
 		if reportErr := s.Herdr.ReportMetadata(ctx, target.PaneID, metadata); reportErr != nil {
 			result.PublishErr = usage.SanitizeText(reportErr.Error(), 512)
 		}
 	}
 	return result
+}
+
+func enrichSnapshot(snapshot *usage.Snapshot, target collector.Target) {
+	snapshot.PaneID = target.PaneID
+	snapshot.WorkspaceID = target.WorkspaceID
+	snapshot.State = target.State
+	if snapshot.Harness == "" {
+		snapshot.Harness = target.Harness
+	}
+	if snapshot.Confidence == "" {
+		snapshot.Confidence = target.Confidence
+	}
 }
 
 func metadataFor(snapshot *usage.Snapshot) herdr.Metadata {
