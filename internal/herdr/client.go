@@ -179,12 +179,18 @@ func (s Snapshot) Targets() []collector.Target {
 			Confidence:  usage.ConfidenceEstimated,
 		}
 		if record.AgentSession != nil && strings.TrimSpace(record.AgentSession.Value) != "" {
-			target.SessionID = strings.TrimSpace(record.AgentSession.Value)
+			value := strings.TrimSpace(record.AgentSession.Value)
+			kind := strings.ToLower(strings.TrimSpace(record.AgentSession.Kind))
+			// SessionID is specifically a native ID. Keep path and other typed
+			// references in SessionRef so collectors can resolve them correctly.
+			if kind == "" || kind == "id" {
+				target.SessionID = value
+			}
 			target.SessionRef = &collector.SessionRef{
 				Source: record.AgentSession.Source,
 				Agent:  record.AgentSession.Agent,
-				Kind:   record.AgentSession.Kind,
-				Value:  strings.TrimSpace(record.AgentSession.Value),
+				Kind:   kind,
+				Value:  value,
 			}
 			target.Confidence = usage.ConfidenceExact
 		} else if ref := localPiSessionRef(harness, record, s.FocusedPaneID, target.CWD); ref != nil {

@@ -157,6 +157,13 @@ func (c *Collector) resolveSessionDir() (string, error) {
 }
 
 func (c *Collector) resolveSession(ctx context.Context, root string, target basecollector.Target) (string, usage.Confidence, error) {
+	if target.SessionRef != nil && strings.EqualFold(strings.TrimSpace(target.SessionRef.Kind), "path") {
+		path, err := findSessionByPath(root, target.SessionRef.Value)
+		if err != nil {
+			return "", "", err
+		}
+		return path, usage.ConfidenceExact, nil
+	}
 	if strings.TrimSpace(target.SessionID) != "" {
 		path, err := findSessionByID(ctx, root, target.SessionID)
 		if err != nil {
@@ -172,6 +179,35 @@ func (c *Collector) resolveSession(ctx context.Context, root string, target base
 		return "", "", err
 	}
 	return path, usage.ConfidenceEstimated, nil
+}
+
+func findSessionByPath(root, value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" || !filepath.IsAbs(value) || filepath.Ext(value) != ".jsonl" {
+		return "", basecollector.ErrSessionNotFound
+	}
+
+	rootPath, err := filepath.Abs(filepath.Clean(root))
+	if err != nil {
+		return "", basecollector.ErrSessionNotFound
+	}
+	rootPath, err = filepath.EvalSymlinks(rootPath)
+	if err != nil {
+		return "", basecollector.ErrSessionNotFound
+	}
+	sessionPath, err := filepath.EvalSymlinks(filepath.Clean(value))
+	if err != nil {
+		return "", basecollector.ErrSessionNotFound
+	}
+	relative, err := filepath.Rel(rootPath, sessionPath)
+	if err != nil || relative == ".." || filepath.IsAbs(relative) || strings.HasPrefix(relative, ".."+string(os.PathSeparator)) {
+		return "", basecollector.ErrSessionNotFound
+	}
+	info, err := os.Stat(sessionPath)
+	if err != nil || !info.Mode().IsRegular() || info.Size() > defaultMaxSessionBytes {
+		return "", basecollector.ErrSessionNotFound
+	}
+	return sessionPath, nil
 }
 
 type sessionCandidate struct {

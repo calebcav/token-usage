@@ -182,8 +182,17 @@ func (c *FileSnapshotCache) path(target collector.Target) (path, key string, ok 
 	if cwd != "" {
 		cwd = filepath.Clean(cwd)
 	}
+	refKind := ""
+	refValue := ""
+	if target.SessionRef != nil {
+		kind := strings.ToLower(strings.TrimSpace(target.SessionRef.Kind))
+		if kind != "" && kind != "id" {
+			refKind = kind
+			refValue = strings.TrimSpace(target.SessionRef.Value)
+		}
+	}
 	digest := sha256.New()
-	for _, value := range []string{harness, strings.TrimSpace(target.WorkspaceID), paneID, cwd} {
+	for _, value := range []string{harness, strings.TrimSpace(target.WorkspaceID), paneID, cwd, refKind, refValue} {
 		_, _ = fmt.Fprintf(digest, "%d:", len(value))
 		_, _ = io.WriteString(digest, value)
 	}
@@ -210,10 +219,20 @@ func snapshotMatchesTarget(snapshot usage.Snapshot, target collector.Target) boo
 	if collector.CanonicalHarness(snapshot.Harness) != collector.CanonicalHarness(target.Harness) {
 		return false
 	}
-	if sessionID := strings.TrimSpace(target.SessionID); sessionID != "" && snapshot.SessionID != sessionID {
-		return false
+	if sessionID := strings.TrimSpace(target.SessionID); sessionID != "" {
+		return snapshot.SessionID == sessionID
 	}
-	return true
+	if target.SessionRef == nil {
+		return true
+	}
+	kind := strings.ToLower(strings.TrimSpace(target.SessionRef.Kind))
+	value := strings.TrimSpace(target.SessionRef.Value)
+	if (kind == "" || kind == "id") && value != "" {
+		return snapshot.SessionID == value
+	}
+	// Non-ID references are bound to the cache key as a one-way hash. The
+	// collector validates the reference before a snapshot can be stored.
+	return value != ""
 }
 
 func quotaIsStale(quota *usage.QuotaSnapshot, now time.Time) bool {
