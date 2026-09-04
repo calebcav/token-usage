@@ -2,25 +2,50 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
   contents: write
+  pull-requests: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - name: Create or update release PR
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - name: Check out release tag
+        if: ${{ steps.release.outputs.release_created }}
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v6
+          ref: ${{ steps.release.outputs.tag_name }}
+
+      - name: Set up Go
+        if: ${{ steps.release.outputs.release_created }}
+        uses: actions/setup-go@v6
         with:
           go-version-file: .go-version
           cache: true
-      - run: go test ./...
-      - uses: goreleaser/goreleaser-action@v7
+
+      - name: Test
+        if: ${{ steps.release.outputs.release_created }}
+        run: go test ./...
+
+      - name: Publish release artifacts
+        if: ${{ steps.release.outputs.release_created }}
+        uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: latest

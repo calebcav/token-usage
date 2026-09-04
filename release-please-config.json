@@ -1,0 +1,16 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "7639c7ac44c93dbe9049789191669b9915c3aa97",
+  "release-type": "simple",
+  "packages": {
+    ".": {
+      "package-name": "token-usage",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "herdr-plugin.toml"
+        }
+      ]
+    }
+  }
+}
