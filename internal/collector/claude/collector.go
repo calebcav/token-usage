@@ -578,7 +578,9 @@ func consumeTranscriptLine(parsed *parsedTranscript, line []byte, lineNumber int
 	parsed.sessionID = sessionID
 	parsed.version = version
 	parsed.valid = true
-	if message.Model != "" {
+	// Locally generated messages (such as API errors) use this placeholder.
+	// Keep the last actual model instead of displaying it as the session model.
+	if message.Model != "" && message.Model != "<synthetic>" {
 		parsed.model = message.Model
 	}
 
