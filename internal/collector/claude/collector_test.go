@@ -80,6 +80,57 @@ func TestCollectExactSessionDeduplicatesAndNormalizesUsage(t *testing.T) {
 	}
 }
 
+func TestCollectIgnoresSyntheticModel(t *testing.T) {
+	const synthetic = `{"type":"assistant","sessionId":"session-synthetic","timestamp":"2026-08-30T12:00:00Z","isApiErrorMessage":true,"error":"server_error","message":{"id":"error-1","role":"assistant","model":"<synthetic>","usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}`
+	real := transcriptRecord("session-synthetic", "message-1", 2, 3)
+	recovered := strings.ReplaceAll(transcriptRecord("session-synthetic", "message-2", 4, 5), "claude-test", "claude-new")
+	for _, test := range []struct {
+		name      string
+		initial   string
+		appended  string
+		wantModel string
+		wantTotal uint64
+	}{
+		{name: "initial parse", initial: real + "\n" + synthetic, wantModel: "claude-test", wantTotal: 5},
+		{name: "appended error", initial: real, appended: synthetic, wantModel: "claude-test", wantTotal: 5},
+		{name: "only synthetic", initial: synthetic},
+		{name: "model change after error", initial: real + "\n" + synthetic, appended: recovered, wantModel: "claude-new", wantTotal: 14},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			projectsDir, path := makeTranscriptPath(t, "session-synthetic")
+			if err := os.WriteFile(path, []byte(test.initial+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			collector := newTestCollector(t, WithProjectsDir(projectsDir))
+			target := basecollector.Target{Harness: "claude", SessionID: "session-synthetic"}
+			if test.appended != "" {
+				if _, err := collector.Collect(context.Background(), target); err != nil {
+					t.Fatal(err)
+				}
+				file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, writeErr := file.WriteString(test.appended + "\n")
+				closeErr := file.Close()
+				if err := errors.Join(writeErr, closeErr); err != nil {
+					t.Fatal(err)
+				}
+			}
+			snapshot, err := collector.Collect(context.Background(), target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if snapshot.Model != test.wantModel {
+				t.Errorf("Model = %q, want %q", snapshot.Model, test.wantModel)
+			}
+			if snapshot.Tokens.Total != test.wantTotal {
+				t.Errorf("Total = %d, want %d", snapshot.Tokens.Total, test.wantTotal)
+			}
+		})
+	}
+}
+
 func TestCollectToleratesMissingCacheAndReasoningFields(t *testing.T) {
 	collector := newTestCollector(t,
 		WithConfigDir(filepath.Join("testdata", "config")),
