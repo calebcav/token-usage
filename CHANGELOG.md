@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.1](https://github.com/calebcav/token-usage/compare/token-usage-v0.2.0...token-usage-v0.2.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* **claude:** preserve actual model after synthetic messages ([9eac494](https://github.com/calebcav/token-usage/commit/9eac494031c410972eabee93b7f7785300b66213))
+* **claude:** preserve actual model after synthetic messages ([55386c2](https://github.com/calebcav/token-usage/commit/55386c267895014528cf1e1f1d10c049b4cf5786))
+* resolve Pi session path references ([41562b0](https://github.com/calebcav/token-usage/commit/41562b04298baca55cf13b215e400f93079e5e05))
+* resolve Pi session path references ([4e9355e](https://github.com/calebcav/token-usage/commit/4e9355e99675369ccdee76cbb58de3c1761107ac))
+
 ## [0.2.0](https://github.com/calebcav/token-usage/compare/token-usage-v0.1.0...token-usage-v0.2.0) (2026-09-04)
 
 
