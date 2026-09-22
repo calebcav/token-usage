@@ -189,6 +189,65 @@ func TestCollectIgnoresPartialTrailingRecord(t *testing.T) {
 	}
 }
 
+// Extensions such as pi-features' subagents/code_review tools fold child
+// process usage into the parent assistant message's billing counters but keep
+// totalTokens as the parent's real context size. That is valid Pi data and must
+// not be reported as malformed; the counters are summed and the context window
+// follows totalTokens.
+func TestCollectAcceptsAggregatedSubagentUsage(t *testing.T) {
+	root := t.TempDir()
+	writePiSession(t, root, "proj", `
+{"type":"session","version":3,"id":"agg","timestamp":"2026-09-04T00:00:00.000Z","cwd":"/workspace/project"}
+{"type":"message","id":"u1","parentId":null,"timestamp":"2026-09-04T00:00:01.000Z","message":{"role":"user","content":"review"}}
+{"type":"message","id":"a1","parentId":"u1","timestamp":"2026-09-04T00:00:02.000Z","message":{"role":"assistant","provider":"anthropic","model":"claude-sonnet","stopReason":"toolUse","usage":{"input":100,"output":20,"cacheRead":1000,"cacheWrite":50,"reasoning":5,"totalTokens":1170}}}
+{"type":"message","id":"t1","parentId":"a1","timestamp":"2026-09-04T00:00:03.000Z","message":{"role":"toolResult","toolName":"code_review","content":[{"type":"text","text":"done"}]}}
+{"type":"message","id":"a2","parentId":"t1","timestamp":"2026-09-04T00:00:04.000Z","message":{"role":"assistant","provider":"anthropic","model":"claude-sonnet","stopReason":"stop","usage":{"input":291757,"output":25078,"cacheRead":2623386,"cacheWrite":3739,"reasoning":952,"totalTokens":256444}}}
+`)
+	collector := New(Config{
+		SessionDir: root,
+		Now:        fixedNow,
+		ContextResolver: contextResolverFunc(func(context.Context, string, string) (uint64, error) {
+			return 1_000_000, nil
+		}),
+	})
+	snapshot, err := collector.Collect(context.Background(), basecollector.Target{Harness: "pi", SessionID: "agg", Confidence: usage.ConfidenceExact})
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	want := usage.Tokens{
+		FreshInput: 100 + 291757,
+		CacheRead:  1000 + 2623386,
+		CacheWrite: 50 + 3739,
+		Output:     20 + 25078,
+		Reasoning:  5 + 952,
+		Total:      (100 + 291757) + (1000 + 2623386) + (50 + 3739) + (20 + 25078),
+	}
+	if snapshot.Tokens != want {
+		t.Fatalf("tokens = %+v, want %+v", snapshot.Tokens, want)
+	}
+	if snapshot.Context == nil || *snapshot.Context != (usage.ContextWindow{Used: 256444, Limit: 1_000_000}) {
+		t.Fatalf("context = %+v, want totalTokens-derived usage", snapshot.Context)
+	}
+}
+
+// Pi's OpenAI-family providers pass through the API's total_tokens verbatim,
+// which does not have to match the normalized component sum either.
+func TestCollectAcceptsProviderTotalTokensMismatch(t *testing.T) {
+	root := t.TempDir()
+	writePiSession(t, root, "proj", `
+{"type":"session","version":3,"id":"codex","timestamp":"2026-09-04T00:00:00.000Z","cwd":"/workspace/project"}
+{"type":"message","id":"a1","parentId":null,"timestamp":"2026-09-04T00:00:03.000Z","message":{"role":"assistant","provider":"openai-codex","model":"gpt-5.6-sol","stopReason":"stop","usage":{"input":24729,"output":425,"cacheRead":68864,"cacheWrite":0,"reasoning":44,"totalTokens":84876}}}
+`)
+	collector := New(Config{SessionDir: root, Now: fixedNow})
+	snapshot, err := collector.Collect(context.Background(), basecollector.Target{Harness: "pi", SessionID: "codex", Confidence: usage.ConfidenceExact})
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if snapshot.Tokens.Total != 24729+425+68864 {
+		t.Fatalf("tokens = %+v", snapshot.Tokens)
+	}
+}
+
 func TestCollectRejectsMalformedUsage(t *testing.T) {
 	root := t.TempDir()
 	writePiSession(t, root, "proj", `
