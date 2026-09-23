@@ -456,6 +456,8 @@ func parseSessionFile(path string) (parsedSession, error) {
 			return parsedSession{}, malformed(errors.New("token count overflow"))
 		}
 		if entry.assistant && entry.stopReason != "aborted" && entry.stopReason != "error" {
+			// Mirror Pi's own context estimate: prefer the provider-reported
+			// totalTokens and only fall back to summing components when absent.
 			used := value(entry.usage.TotalTokens)
 			if used == 0 {
 				used, _ = addValues(input, out, read, write)
@@ -541,6 +543,16 @@ func activePath(lastID string, entries map[string]storedEntry) []string {
 	return reversed
 }
 
+// normalizeRawUsage extracts the billing components from a Pi usage record.
+//
+// It deliberately does not require totalTokens to equal the sum of the
+// components. In Pi, totalTokens is the provider-reported context size after
+// the turn, not a checksum: OpenAI-family providers pass through the API's
+// total_tokens verbatim, and extensions such as the subagents/code_review
+// tools fold child-process token counts into the parent assistant message's
+// input/output/cache counters while intentionally preserving totalTokens so
+// the parent's context occupancy stays accurate. Pi itself only ever uses
+// totalTokens as `totalTokens || sum` and never validates the relationship.
 func normalizeRawUsage(raw rawUsage) (input, output, cacheRead, cacheWrite, reasoning uint64, err error) {
 	input = value(raw.Input)
 	output = value(raw.Output)
@@ -550,14 +562,8 @@ func normalizeRawUsage(raw rawUsage) (input, output, cacheRead, cacheWrite, reas
 	if reasoning > output {
 		return 0, 0, 0, 0, 0, errors.New("reasoning exceeds output")
 	}
-	if raw.TotalTokens != nil {
-		total, ok := addValues(input, output, cacheRead, cacheWrite)
-		if !ok {
-			return 0, 0, 0, 0, 0, errors.New("token count overflow")
-		}
-		if total != *raw.TotalTokens {
-			return 0, 0, 0, 0, 0, errors.New("Pi usage total is inconsistent")
-		}
+	if _, ok := addValues(input, output, cacheRead, cacheWrite); !ok {
+		return 0, 0, 0, 0, 0, errors.New("token count overflow")
 	}
 	return input, output, cacheRead, cacheWrite, reasoning, nil
 }
