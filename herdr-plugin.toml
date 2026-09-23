@@ -1,12 +1,12 @@
 id = "token-usage"
 name = "Token Usage"
-version = "0.2.0" # x-release-please-version
+version = "0.2.1" # x-release-please-version
 min_herdr_version = "0.8.2"
 description = "Local token usage for Codex, Claude Code, OpenCode, Pi, and custom coding harnesses."
 platforms = ["linux", "macos"]
 
 [[build]]
-command = ["go", "build", "-trimpath", "-ldflags", "-s -w -X main.version=0.2.0", "-o", "bin/token-usage", "./cmd/token-usage"] # x-release-please-version
+command = ["go", "build", "-trimpath", "-ldflags", "-s -w -X main.version=0.2.1", "-o", "bin/token-usage", "./cmd/token-usage"] # x-release-please-version
 
 [[startup]]
 command = ["./bin/token-usage", "restore"]
